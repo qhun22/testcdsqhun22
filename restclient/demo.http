@@ -1,0 +1,5 @@
+### Ghi thử một lượt xem trang cửa hàng; phản hồi JSON xác nhận đã ghi vào D1
+POST https://testcdsqhun22.qhun22.workers.dev/api/analytics/page-view HTTP/1.1
+Content-Type: application/json
+
+{}

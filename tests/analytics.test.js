@@ -70,6 +70,19 @@ test("analytics API rejects unbounded or unsupported ranges", async () => {
   assert.equal(response.status, 400);
 });
 
+test("REST Client tracking endpoint records one aggregate page view and returns JSON", async () => {
+  const DB = makeAnalyticsDatabase();
+  const response = await worker.fetch(new Request("https://shop.test/api/analytics/page-view", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}"
+  }), { DB });
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), { ok: true, recorded: true, page: "home" });
+  assert.equal(DB.calls.length, 1);
+  assert.match(DB.calls[0].sql, /INSERT INTO pageview_daily/);
+});
+
 test("storefront page view stores only daily country and OS aggregates", async () => {
   const DB = makeAnalyticsDatabase();
   const tasks = [];

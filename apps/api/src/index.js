@@ -235,6 +235,11 @@ async function api(request, env) {
 
   if (path === "/api/health") return json({ ok: true });
 
+  if (path === "/api/analytics/page-view" && method === "POST") {
+    await recordPageView(request, env);
+    return json({ ok: true, recorded: true, page: "home" }, 201);
+  }
+
   if (path === "/api/chat" && method === "POST") return chat(request, env);
 
   const orderStatusMatch = path.match(/^\/api\/orders\/([1-9]\d*)$/);
