@@ -7,7 +7,7 @@
     "db:local": "wrangler d1 migrations apply cho-nha-db --local",
     "db:remote": "wrangler d1 migrations apply cho-nha-db --remote",
     "deploy": "wrangler deploy",
-    "test": "node --test tests/telegram-payment.test.js",
+    "test": "node --test tests/telegram-payment.test.js tests/analytics.test.js",
     "telegram:poll": "node scripts/poll-telegram.js",
     "telegram:set-webhook": "node scripts/setup-telegram-webhook.js set",
     "telegram:delete-webhook": "node scripts/setup-telegram-webhook.js delete",

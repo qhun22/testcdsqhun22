@@ -33,6 +33,10 @@ API tra cứu trạng thái đơn yêu cầu `ORDER_STATUS_SECRET` và token ký
 
 Chatbot lưu hội thoại, nội dung đang nhập và tiến trình chọn hàng trong `localStorage` của trình duyệt; nút làm mới trong tiêu đề chat chủ động xóa phiên hiện tại. Thông tin giao hàng trong biểu mẫu thanh toán chat cũng được giữ cục bộ cho đến khi hoàn tất hoặc tạo phiên mới.
 
+Tab **Phân tích** trong quản trị thống kê lượt tải trang chủ theo ngày, quốc gia Cloudflare nhận diện và hệ điều hành phân loại từ user-agent. Dữ liệu được cộng gộp trong D1, không lưu IP, cookie, user-agent thô hay mã định danh khách; lượt xem không phải số khách duy nhất. Dữ liệu cũ hơn 90 ngày được xóa theo lịch chạy mỗi ngày. Do đây là thống kê tổng hợp trong D1, nó phù hợp quy mô cửa hàng vừa và nhỏ, không phải nền tảng big-data/streaming.
+
+Đăng nhập quản trị tiếp tục yêu cầu secret `ADMIN_TOKEN` và được lưu trong session của tab; không sử dụng mật khẩu mặc định `admin|123`. Chạy `npm.cmd run db:remote` để áp dụng migration analytics trước khi deploy.
+
 ## Chức năng
 
 - Khách hàng: xem sản phẩm, lọc danh mục, tìm kiếm, giỏ hàng lưu trên trình duyệt và tạo đơn hàng.

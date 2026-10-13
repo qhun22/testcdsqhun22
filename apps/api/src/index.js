@@ -10,6 +10,23 @@ const normalizeText = (value) => String(value || "").normalize("NFD").replace(/\
 const chatUsage = new Map();
 const hasOrderStatusSecret = (secret) => typeof secret === "string" && new TextEncoder().encode(secret).length >= 32;
 
+function operatingSystem(userAgent = "") {
+  if (/android/i.test(userAgent)) return "Android";
+  if (/iphone|ipad|ipod/i.test(userAgent)) return "iOS";
+  if (/windows/i.test(userAgent)) return "Windows";
+  if (/macintosh|mac os/i.test(userAgent)) return "macOS";
+  if (/linux/i.test(userAgent)) return "Linux";
+  return "Khác";
+}
+
+async function recordPageView(request, env) {
+  const country = /^[A-Z]{2}$/.test(request.cf?.country || "") ? request.cf.country : "ZZ";
+  const os = operatingSystem(request.headers.get("user-agent") || "");
+  const day = new Date().toISOString().slice(0, 10);
+  await env.DB.prepare("INSERT INTO pageview_daily (day, country, operating_system, page, views) VALUES (?, ?, ?, 'home', 1) ON CONFLICT(day, country, operating_system, page) DO UPDATE SET views = views + 1")
+    .bind(day, country, os).run();
+}
+
 function allowChatRequest(request) {
   const now = Date.now();
   const key = request.headers.get("cf-connecting-ip") || "local";
@@ -313,6 +330,25 @@ async function api(request, env) {
     return json({ products: products.count, categories: categories.count, orders: orders.count, customers: customers.count });
   }
 
+  if (path === "/api/admin/analytics" && method === "GET") {
+    const days = Number(url.searchParams.get("days") || 30);
+    if (![7, 30, 90].includes(days)) return error("Khoảng thời gian phải là 7, 30 hoặc 90 ngày.");
+    const since = `-${days - 1} days`;
+    const [summary, countries, systems, timeline] = await Promise.all([
+      env.DB.prepare("SELECT COALESCE(SUM(views), 0) AS views FROM pageview_daily WHERE day >= date('now', ?)").bind(since).first(),
+      env.DB.prepare("SELECT country, SUM(views) AS views FROM pageview_daily WHERE day >= date('now', ?) GROUP BY country ORDER BY views DESC LIMIT 10").bind(since).all(),
+      env.DB.prepare("SELECT operating_system AS name, SUM(views) AS views FROM pageview_daily WHERE day >= date('now', ?) GROUP BY operating_system ORDER BY views DESC").bind(since).all(),
+      env.DB.prepare("SELECT day, SUM(views) AS views FROM pageview_daily WHERE day >= date('now', ?) GROUP BY day ORDER BY day").bind(since).all()
+    ]);
+    return json({
+      days,
+      views: summary.views,
+      countries: countries.results,
+      operatingSystems: systems.results,
+      timeline: timeline.results
+    });
+  }
+
   if (path === "/api/admin/products" && method === "GET") {
     const { results } = await env.DB.prepare("SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.created_at DESC").all();
     return json(results);
@@ -379,12 +415,25 @@ async function api(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
       try { return await api(request, env); }
       catch (exception) { console.error(exception); return error("Máy chủ gặp lỗi, vui lòng thử lại.", 500); }
     }
-    return env.ASSETS.fetch(request);
+    const response = await env.ASSETS.fetch(request);
+    if (request.method === "GET" && ["/", "/index.html"].includes(url.pathname) && request.headers.get("accept")?.includes("text/html")) {
+      ctx.waitUntil(recordPageView(request, env).catch((exception) => {
+        console.error("Page-view analytics write failed", exception.name);
+      }));
+    }
+    return response;
+  },
+  async scheduled(_event, env) {
+    try {
+      await env.DB.prepare("DELETE FROM pageview_daily WHERE day < date('now', '-90 days')").run();
+    } catch (exception) {
+      console.error("Page-view analytics retention cleanup failed", exception.name);
+    }
   }
 };
