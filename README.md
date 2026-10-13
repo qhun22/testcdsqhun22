@@ -21,10 +21,10 @@ Hoặc chạy thủ công:
 ## Triển khai Cloudflare
 
 1. Cấu hình `wrangler.jsonc` với account ID và D1 database ID thuộc cùng Cloudflare account. Dự án hiện dùng Worker `testcdsqhun22` và D1 database `cho-nha-db`.
-2. Chạy `npm.cmd run db:remote` để áp dụng migration và dữ liệu khởi tạo; đặc biệt phải chạy khi có migration mới trước khi deploy.
-3. Chạy `npx.cmd wrangler secret put ADMIN_TOKEN` để đặt token quản trị production và `npx.cmd wrangler secret put ORDER_STATUS_SECRET` để ký quyền xem trạng thái từng đơn. Tạo secret trạng thái bằng chuỗi ngẫu nhiên dài tối thiểu 32 ký tự; không dùng chung với Telegram token.
+2. Chạy `npm.cmd run db:remote` để áp dụng migration và dữ liệu khởi tạo; đặc biệt phải chạy khi có migration mới trước khi deploy. Migration `0005` bổ sung mã chuyển khoản ngẫu nhiên gồm 6 ký tự chữ in hoa và chữ số, dùng thống nhất trên QR và thông báo Telegram.
+3. Chạy `npx.cmd wrangler secret put ADMIN_TOKEN` để đặt token quản trị production. Chat dùng `ORDER_STATUS_SECRET` để ký quyền xem trạng thái từng đơn; nếu chưa đặt, mã này được ký bằng `TELEGRAM_WEBHOOK_SECRET` (cả hai phải dài tối thiểu 32 ký tự).
 4. Chạy `npm.cmd run deploy`.
-5. Tạo hai Worker secrets `TELEGRAM_BOT_TOKEN` và `TELEGRAM_WEBHOOK_SECRET` bằng `npx.cmd wrangler secret put <TÊN_SECRET>`. Không ghi token bot vào mã nguồn, file `.vars` được commit hay tin nhắn hỗ trợ.
+5. Tạo hai Worker secrets `TELEGRAM_BOT_TOKEN` và `TELEGRAM_WEBHOOK_SECRET` bằng `npx.cmd wrangler secret put <TÊN_SECRET>`. Bot token phải là token riêng BotFather; webhook secret là một chuỗi ngẫu nhiên riêng dài tối thiểu 32 ký tự, không phải bot token. Không ghi các giá trị này vào Variables, mã nguồn, file `.vars` được commit hay tin nhắn hỗ trợ.
 6. Đặt `TELEGRAM_BOT_TOKEN` và `TELEGRAM_WEBHOOK_SECRET` trong biến môi trường cục bộ hoặc file `.dev.vars` (file này đã bị Git bỏ qua). Sau khi deploy, chạy `npm.cmd run telegram:set-webhook`; script đăng ký URL Worker, secret header và chỉ nhận `callback_query`. Telegram sẽ gửi nút duyệt/từ chối về Worker; duyệt xác nhận đơn, từ chối hủy đơn và hoàn tồn kho.
 
 API tra cứu trạng thái đơn yêu cầu `ORDER_STATUS_SECRET` và token ký riêng cho đơn được trả cùng phản hồi tạo đơn. Không đưa secret ký vào mã nguồn; nếu chưa cấu hình, ứng dụng vẫn tạo đơn nhưng tạm tắt việc tự cập nhật trạng thái thanh toán trong trình duyệt.

@@ -9,6 +9,7 @@ const adminPath = (path) => path.startsWith("/api/admin/");
 const normalizeText = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/gi, "d").toLowerCase();
 const chatUsage = new Map();
 const hasOrderStatusSecret = (secret) => typeof secret === "string" && new TextEncoder().encode(secret).length >= 32;
+const orderStatusSecret = (env) => [env.ORDER_STATUS_SECRET, env.TELEGRAM_WEBHOOK_SECRET].find(hasOrderStatusSecret);
 
 function operatingSystem(userAgent = "") {
   if (/android/i.test(userAgent)) return "Android";
@@ -17,6 +18,22 @@ function operatingSystem(userAgent = "") {
   if (/macintosh|mac os/i.test(userAgent)) return "macOS";
   if (/linux/i.test(userAgent)) return "Linux";
   return "Khác";
+}
+
+const transferCodeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+function randomTransferCode() {
+  const chars = [];
+  const random = new Uint8Array(24);
+  while (chars.length < 6) {
+    crypto.getRandomValues(random);
+    for (const value of random) {
+      if (value >= 252) continue;
+      chars.push(transferCodeAlphabet[value % transferCodeAlphabet.length]);
+      if (chars.length === 6) break;
+    }
+  }
+  return chars.join("");
 }
 
 async function recordPageView(request, env) {
@@ -122,7 +139,7 @@ async function notifyTelegramOrder(env, order, customer, items) {
     "Sản phẩm:",
     itemLines,
     `Tổng tiền: ${order.total.toLocaleString("vi-VN")} VND`,
-    `Nội dung chuyển khoản: CHONHA${order.id}`
+    `Nội dung chuyển khoản: ${order.transferCode}`
   ].join("\n");
   try {
     await telegramApi(env, "sendMessage", {
@@ -154,11 +171,17 @@ async function telegramWebhook(request, env) {
   const action = String(callback.data || "").match(/^pay:(approve|reject):([1-9]\d*)$/);
   if (!trustedChat || !trustedUser || !action) return error("Thao tác duyệt không hợp lệ.", 403);
 
+  try {
+    await telegramApi(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "Đang xử lý đơn hàng..." });
+  } catch (exception) {
+    console.error("Telegram callback acknowledgement failed", exception.name);
+  }
+
   const orderId = Number(action[2]);
   const order = await env.DB.prepare("SELECT id, payment_method, payment_status, status FROM orders WHERE id = ?").bind(orderId).first();
   if (!order || order.payment_method !== "vietqr" || order.payment_status !== "pending" || order.status !== "pending") {
-    try { await telegramApi(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "Đơn này không còn chờ duyệt." }); }
-    catch (exception) { console.error("Telegram callback acknowledgement failed", exception.name); }
+    try { await telegramApi(env, "editMessageText", { chat_id: message.chat.id, message_id: message.message_id, text: `Chợ Nhà · Đơn #${orderId} không còn chờ duyệt.` }); }
+    catch (exception) { console.error("Telegram stale review message update failed", exception.name); }
     return json({ ok: true });
   }
 
@@ -216,11 +239,12 @@ async function api(request, env) {
 
   const orderStatusMatch = path.match(/^\/api\/orders\/([1-9]\d*)$/);
   if (orderStatusMatch && method === "GET") {
-    if (!hasOrderStatusSecret(env.ORDER_STATUS_SECRET)) return error("Kiểm tra trạng thái đơn chưa được cấu hình an toàn.", 503);
+    const signingSecret = orderStatusSecret(env);
+    if (!signingSecret) return error("Kiểm tra trạng thái đơn chưa được cấu hình an toàn.", 503);
     const orderId = Number(orderStatusMatch[1]);
     const suppliedToken = request.headers.get("authorization")?.match(/^Bearer ([a-f0-9]{64})$/i)?.[1];
     if (!suppliedToken) return error("Bạn không có quyền xem trạng thái đơn này.", 401);
-    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.ORDER_STATUS_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(signingSecret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
     const signature = Uint8Array.from(suppliedToken.match(/.{2}/g), (byte) => Number.parseInt(byte, 16));
     const authorized = await crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(String(orderId)));
     if (!authorized) return error("Bạn không có quyền xem trạng thái đơn này.", 401);
@@ -292,24 +316,39 @@ async function api(request, env) {
         await env.DB.prepare("INSERT INTO order_items (order_id, product_id, product_name, unit_price, quantity) VALUES (?, ?, ?, ?, ?)")
           .bind(orderId.id, product.id, product.name, product.price, quantity).run();
       }
-      await env.DB.prepare("UPDATE orders SET total = ? WHERE id = ?").bind(total, orderId.id).run();
+      let transferCode;
+      if (paymentMethod === "vietqr") {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          transferCode = randomTransferCode();
+          try {
+            await env.DB.prepare("UPDATE orders SET total = ?, transfer_code = ? WHERE id = ?")
+              .bind(total, transferCode, orderId.id).run();
+            break;
+          } catch (exception) {
+            if (!String(exception.message).includes("UNIQUE constraint failed: orders.transfer_code") || attempt === 9) throw exception;
+          }
+        }
+      } else {
+        await env.DB.prepare("UPDATE orders SET total = ? WHERE id = ?").bind(total, orderId.id).run();
+      }
       let payment;
       let telegramNotification;
       if (paymentMethod === "vietqr") {
         const qrUrl = new URL(`https://img.vietqr.io/image/${encodeURIComponent(env.VIETQR_BANK_ID)}-${encodeURIComponent(env.VIETQR_ACCOUNT_NUMBER)}-compact2.png`);
         qrUrl.searchParams.set("amount", String(total));
-        qrUrl.searchParams.set("addInfo", `CHONHA${orderId.id}`);
+        qrUrl.searchParams.set("addInfo", transferCode);
         qrUrl.searchParams.set("accountName", env.VIETQR_ACCOUNT_NAME.trim());
-        const order = { id: orderId.id, total };
+        const order = { id: orderId.id, total, transferCode };
         const orderItems = [...quantities].map(([productId, quantity]) => ({
           name: products.get(productId).name,
           price: products.get(productId).price,
           quantity
         }));
         telegramNotification = await notifyTelegramOrder(env, order, { name, phone, address }, orderItems);
-        payment = { method: "vietqr", status: paymentStatus, qrUrl: qrUrl.toString(), transferContent: `CHONHA${orderId.id}`, adminNotification: telegramNotification };
+        payment = { method: "vietqr", status: paymentStatus, qrUrl: qrUrl.toString(), transferContent: transferCode, adminNotification: telegramNotification };
       }
-      const statusToken = hasOrderStatusSecret(env.ORDER_STATUS_SECRET) ? await signOrderStatusToken(env.ORDER_STATUS_SECRET, orderId.id) : undefined;
+      const signingSecret = orderStatusSecret(env);
+      const statusToken = signingSecret ? await signOrderStatusToken(signingSecret, orderId.id) : undefined;
       return json({ id: orderId.id, total, status: "pending", statusToken, payment }, 201);
     } catch (exception) {
       if (orderId?.id) await env.DB.prepare("DELETE FROM orders WHERE id = ?").bind(orderId.id).run();

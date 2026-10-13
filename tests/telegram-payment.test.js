@@ -3,7 +3,7 @@ import test from "node:test";
 import worker from "../apps/api/src/index.js";
 
 const chatId = "5032505212";
-const webhookSecret = "test-webhook-secret";
+const webhookSecret = "test-webhook-secret-long-enough-for-signing";
 const orderStatusSecret = "test-order-status-secret-that-is-long-enough";
 
 function makeDatabase() {
@@ -77,7 +77,11 @@ test("VietQR orders send an approval message with Telegram buttons", async () =>
     assert.match(telegramCalls[0].url, /sendMessage$/);
     assert.equal(telegramCalls[0].body.chat_id, chatId);
     assert.deepEqual(telegramCalls[0].body.reply_markup.inline_keyboard[0].map((button) => button.callback_data), ["pay:approve:21", "pay:reject:21"]);
-    assert.match(telegramCalls[0].body.text, /CHONHA21/);
+    const transferCode = body.payment.transferContent;
+    assert.match(transferCode, /^[A-Z0-9]{6}$/);
+    assert.equal(new URL(body.payment.qrUrl).searchParams.get("addInfo"), transferCode);
+    assert.match(telegramCalls[0].body.text, new RegExp(`Nội dung chuyển khoản: ${transferCode}`));
+    assert.ok(DB.calls.runs.some(({ sql, args }) => sql.includes("transfer_code") && args[1] === transferCode));
     assert.match(telegramCalls[0].body.text, /Hà Nội/);
   } finally { globalThis.fetch = originalFetch; }
 });
@@ -155,8 +159,10 @@ test("Telegram approval confirms the order only for the configured admin", async
     assert.equal(response.status, 200);
     assert.match(DB.calls.runs[0].sql, /payment_status = 'paid', status = 'confirmed'/);
     assert.equal(DB.calls.runs[0].args[0], 21);
-    assert.equal(telegramCalls.length, 2);
-    assert.match(telegramCalls[1].url, /editMessageText$/);
+    assert.match(telegramCalls[0].url, /answerCallbackQuery$/);
+    assert.match(telegramCalls[0].body.text, /Đang xử lý/);
+    assert.equal(telegramCalls.length, 3);
+    assert.match(telegramCalls[2].url, /editMessageText$/);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -182,7 +188,7 @@ test("Telegram refusal cancels a pending order and releases stock once", async (
     assert.match(DB.calls.batches[0][1].sql, /stock = stock \+/);
     assert.match(DB.calls.batches[0][1].sql, /payment_status = 'unpaid'/);
     assert.match(DB.calls.batches[0][2].sql, /stock_released = 1/);
-    assert.equal(telegramCalls.length, 2);
+    assert.equal(telegramCalls.length, 3);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -242,4 +248,20 @@ test("Telegram webhook rejects callbacks when TELEGRAM_WEBHOOK_SECRET is missing
   }), makeEnv(DB, { TELEGRAM_WEBHOOK_SECRET: undefined }));
   assert.equal(response.status, 503);
   assert.equal(DB.calls.runs.length, 0);
+});
+
+test("Telegram webhook secret can sign chat order-status checks", async () => {
+  const DB = makeDatabase();
+  const response = await worker.fetch(new Request("https://shop.test/api/orders/21", { method: "GET" }), makeEnv(DB, {
+    ORDER_STATUS_SECRET: undefined
+  }));
+  assert.equal(response.status, 401);
+
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(webhookSecret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("21")));
+  const token = [...signature].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const authorized = await worker.fetch(new Request("https://shop.test/api/orders/21", {
+    headers: { authorization: `Bearer ${token}` }
+  }), makeEnv(DB, { ORDER_STATUS_SECRET: undefined }));
+  assert.equal(authorized.status, 200);
 });
