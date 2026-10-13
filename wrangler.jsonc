@@ -11,7 +11,7 @@
     "directory": "./apps/storefront",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/", "/index.html", "/dashboard", "/dashboard/"]
+    "run_worker_first": ["/api/*", "/", "/index.html", "/dashboard", "/dashboard/"]
   },
   "ai": {
     "binding": "AI"
