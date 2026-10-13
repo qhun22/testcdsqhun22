@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "cho-nha-commerce",
+  "name": "testcdsqhun22",
+  "account_id": "c0569221e44f432f6669b8df70446872",
   "main": "apps/api/src/index.js",
   "compatibility_date": "2026-09-28",
   "assets": {
@@ -15,7 +16,7 @@
     {
       "binding": "DB",
       "database_name": "cho-nha-db",
-      "database_id": "5839dbc5-0eaa-4a03-a152-7005f7b037d6",
+      "database_id": "14fdc297-226d-44ea-a353-5370979bffd9",
       "migrations_dir": "migrations"
     }
   ]

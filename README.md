@@ -20,7 +20,7 @@ Yêu cầu Node.js 20+ và npm.
 
 ## Triển khai Cloudflare
 
-1. Tạo D1 database `cho-nha-db` trong Cloudflare và thay `database_id` trong `wrangler.jsonc` bằng ID được cấp.
+1. Cấu hình `wrangler.jsonc` với account ID và D1 database ID thuộc cùng Cloudflare account. Dự án hiện dùng Worker `testcdsqhun22` và D1 database `cho-nha-db`.
 2. Chạy `npm.cmd run db:remote` để áp dụng migration và dữ liệu khởi tạo.
 3. Chạy `npx.cmd wrangler secret put ADMIN_TOKEN` để đặt token quản trị production.
 4. Chạy `npm.cmd run deploy`.
