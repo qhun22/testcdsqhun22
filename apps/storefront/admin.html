@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#f5f4ed">
+  <title>Quản trị — Chợ Nhà</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet"><link rel="stylesheet" href="/admin.css"><script src="/admin.js" defer></script>
+</head>
+<body>
+  <header class="admin-header"><a class="brand" href="/"><span class="brand-mark">cn.</span><span>chợ nhà <small>/ quản trị</small></span></a><div class="admin-actions"><a href="/">← Cửa hàng</a><button id="logout" hidden>Đăng xuất</button></div></header>
+  <main class="admin-main">
+    <section id="login-panel" class="login-panel"><p class="eyebrow">KHU VỰC QUẢN TRỊ</p><h1>Chào bạn trở lại.</h1><p>Nhập mã quản trị để tiếp tục.</p><form id="login-form"><input type="password" id="admin-token" placeholder="Mã quản trị" autocomplete="current-password" required><button class="primary-button">Đăng nhập <span>↗</span></button><p class="message" id="login-message" role="status"></p></form></section>
+    <div id="dashboard" hidden>
+      <div class="page-title"><div><p class="eyebrow">TỔNG QUAN CỬA HÀNG</p><h1>Chào buổi sáng.</h1></div><button class="primary-button" id="add-product">+ Thêm sản phẩm</button></div>
+      <section class="metrics" id="metrics"></section>
+      <nav class="tabs" aria-label="Khu vực quản trị"><button class="tab active" data-tab="orders">Đơn hàng</button><button class="tab" data-tab="products">Sản phẩm</button><button class="tab" data-tab="categories">Danh mục</button><button class="tab" data-tab="customers">Khách hàng</button></nav>
+      <section class="admin-content" id="admin-content"></section>
+    </div>
+  </main>
+  <dialog id="product-dialog"><form method="dialog" id="product-form"><div class="dialog-heading"><h2 id="dialog-title">Thêm sản phẩm</h2><button class="icon-button" value="cancel" aria-label="Đóng">×</button></div><input type="hidden" name="id"><label>Tên sản phẩm<input name="name" required></label><label>Mô tả<textarea name="description"></textarea></label><div class="form-grid"><label>Giá (₫)<input name="price" type="number" min="0" required></label><label>Tồn kho<input name="stock" type="number" min="0" value="0"></label></div><label>Danh mục<select name="categoryId" id="product-category"></select></label><label>Đường dẫn ảnh<input name="imageUrl" type="url" placeholder="https://..."></label><label class="check-label"><input name="featured" type="checkbox"> Gắn nhãn nổi bật</label><div class="dialog-actions"><button class="secondary-button" value="cancel">Hủy</button><button class="primary-button" id="save-product" value="default">Lưu sản phẩm</button></div></form></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4ed">
+  <meta name="description" content="Chợ Nhà - thực phẩm ngon lành và đồ dùng tử tế cho căn bếp Việt.">
+  <title>Chợ Nhà — cửa hàng thực phẩm lành</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/chatbot.css">
+  <script src="/store.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Chợ Nhà, trang chủ"><span class="brand-mark">cn.</span><span>chợ nhà</span></a>
+    <nav class="main-nav" aria-label="Điều hướng chính"><a class="active" href="#shop">Cửa hàng</a></nav>
+    <button class="cart-button" id="open-cart" aria-label="Mở giỏ hàng">Giỏ hàng <span id="cart-count">0</span></button>
+  </header>
+  <main>
+    <section class="shop-section" id="shop">
+      <div class="section-heading"><div><p class="eyebrow">GIAN HÀNG HÔM NAY</p><h2>Chọn món nhà mình</h2></div><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Tìm món ngon..." aria-label="Tìm sản phẩm"></label></div>
+      <div class="category-list" id="categories" aria-label="Lọc theo danh mục"><button class="category-chip active" data-category="">Tất cả</button></div>
+      <div class="product-grid" id="products" aria-live="polite"><p class="loading">Đang lấy món ngon...</p></div>
+    </section>
+    <section class="promise-strip"><span>01 / Chọn theo mùa</span><span>02 / Gói bằng sự tử tế</span><span>03 / Giao đến tận nhà</span></section>
+  </main>
+  <footer class="site-footer"><a class="brand" href="/"><span class="brand-mark">cn.</span><span>chợ nhà</span></a><p>Một chút lành cho căn bếp mỗi ngày.</p><a href="/admin.html">Quản trị cửa hàng ↗</a></footer>
+  <div class="drawer-backdrop" id="cart-backdrop" hidden></div>
+  <aside class="cart-drawer" id="cart-drawer" aria-label="Giỏ hàng" aria-hidden="true">
+    <div class="drawer-heading"><div><p class="eyebrow">ĐÃ CHỌN CHO BỮA NGON</p><h2>Giỏ hàng <span id="drawer-count">(0)</span></h2></div><button class="icon-button" id="close-cart" aria-label="Đóng giỏ hàng">×</button></div>
+    <div class="cart-items" id="cart-items"></div>
+    <div class="checkout-area"><div class="cart-total"><span>Tạm tính</span><strong id="cart-total">0 ₫</strong></div><form id="checkout-form" class="checkout-form"><h3>Thông tin nhận hàng</h3><input name="name" placeholder="Họ và tên" autocomplete="name" required><input name="phone" placeholder="Số điện thoại" autocomplete="tel" required><input name="email" type="email" placeholder="Email" autocomplete="email" required><textarea name="address" placeholder="Địa chỉ giao hàng" autocomplete="street-address" required></textarea><select name="paymentMethod" aria-label="Phương thức thanh toán"><option value="cod">Thanh toán khi nhận hàng</option><option value="bank_transfer">Chuyển khoản thủ công</option></select><button class="button-primary" type="submit">Đặt hàng <span>↗</span></button><p class="form-message" id="checkout-message" role="status"></p></form></div>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <button class="chat-launcher" id="chat-launcher" type="button" aria-label="Mở trợ lý Chợ Nhà" aria-expanded="false" aria-controls="chat-panel"><span aria-hidden="true">✳</span><span class="chat-launcher-label">Hỏi Chợ Nhà</span></button>
+  <section class="chat-panel" id="chat-panel" aria-label="Trợ lý Chợ Nhà" aria-hidden="true" hidden>
+    <header class="chat-header"><div class="chat-avatar" aria-hidden="true">cn.</div><div><h2>Trợ lý Chợ Nhà</h2><p><span></span> Sẵn sàng hỗ trợ</p></div><button class="chat-close" id="chat-close" type="button" aria-label="Đóng trò chuyện">×</button></header>
+    <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-relevant="additions">
+      <div class="chat-message assistant-message"><p>Chào bạn! Mình có thể giúp tìm món trong cửa hàng hoặc giải đáp về cách đặt hàng, thanh toán.</p></div>
+    </div>
+    <form class="chat-form" id="chat-form"><label class="visually-hidden" for="chat-input">Tin nhắn cho trợ lý</label><input id="chat-input" name="message" type="text" maxlength="500" placeholder="Bạn đang cần tìm gì?" autocomplete="off" required><button type="submit" aria-label="Gửi tin nhắn">↗</button></form>
+    <p class="chat-disclaimer">Trợ lý có thể trả lời chưa chính xác. Đơn hàng chỉ được xác nhận khi bạn đặt tại cửa hàng.</p>
+  </section>
+</body>
+</html>
