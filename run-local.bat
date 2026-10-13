@@ -20,6 +20,7 @@ if not exist "node_modules\wrangler" (
   if errorlevel 1 goto fail
 )
 
+
 echo Applying local D1 migrations...
 call npm.cmd run db:local
 if errorlevel 1 goto fail
@@ -28,6 +29,7 @@ echo Starting the local development server...
 echo Press Ctrl+C to stop the server.
 call npm.cmd run dev
 if errorlevel 1 goto fail
+
 exit /b 0
 
 :fail

@@ -8,6 +8,7 @@ const slugify = (value) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, ""
 const adminPath = (path) => path.startsWith("/api/admin/");
 const normalizeText = (value) => String(value || "").normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/gi, "d").toLowerCase();
 const chatUsage = new Map();
+const hasOrderStatusSecret = (secret) => typeof secret === "string" && new TextEncoder().encode(secret).length >= 32;
 
 function allowChatRequest(request) {
   const now = Date.now();
@@ -24,13 +25,14 @@ function allowChatRequest(request) {
 
 function fallbackChatReply(message, products, productIntent) {
   const normalized = normalizeText(message);
-  if (products.length) return `Mình tìm thấy ${products.length} sản phẩm phù hợp bên dưới. Bạn có thể xem giá và thêm món vào giỏ ngay tại đây.`;
+  if (products.length) return `Mình tìm thấy ${products.length} sản phẩm phù hợp bên dưới. Bạn có thể chọn món để tạo đơn và quét mã VietQR thanh toán ngay tại đây hoặc thêm vào giỏ.`;
   if (productIntent) return "Mình chưa tìm thấy sản phẩm còn hàng phù hợp. Bạn thử một tên món khác hoặc từ khóa ngắn hơn nhé.";
-  if (/thanh toan|chuyen khoan|cod|tien mat/.test(normalized)) return "Cửa hàng hỗ trợ thanh toán khi nhận hàng hoặc chuyển khoản thủ công. Bạn chọn phương thức ở phần thông tin nhận hàng khi đặt đơn nhé.";
-  if (/dat hang|mua hang|don hang|gio hang/.test(normalized)) return "Bạn thêm sản phẩm vào giỏ, mở Giỏ hàng, điền thông tin nhận hàng rồi chọn Đặt hàng. Đơn sẽ ở trạng thái chờ cửa hàng xác nhận.";
-  if (/giao hang|phi ship|van chuyen|thoi gian giao/.test(normalized)) return "Cửa hàng hiện chưa hiển thị phí hoặc thời gian giao hàng cụ thể. Bạn có thể gửi địa chỉ trong đơn để cửa hàng xác nhận.";
-  if (/doi tra|hoan tien|huy don/.test(normalized)) return "Mình chưa có thông tin chính sách đổi trả hoặc hủy đơn. Bạn vui lòng liên hệ cửa hàng để được xác nhận.";
-  return "Mình có thể giúp tìm sản phẩm, hướng dẫn đặt hàng và giải đáp về thanh toán. Bạn thử hỏi tên món cần tìm hoặc cách đặt đơn nhé.";
+  if (/online|truc tuyen|vietqr|momo|vnpay/.test(normalized)) return "Dạ! Bạn có thể chọn món và thanh toán online trực tiếp qua VietQR ngay tại khung chat này hoặc qua giỏ hàng. Sau khi tạo đơn, mã VietQR sẽ hiển thị ngay với số tiền và nội dung chuyển khoản chính xác để bạn quét thanh toán.";
+  if (/thanh toan|chuyen khoan|cod|tien mat/.test(normalized)) return "Dạ! Cửa hàng hỗ trợ chuyển khoản VietQR trực tiếp qua khung chat hoặc thanh toán khi nhận hàng (COD) và chuyển khoản qua giỏ hàng. Bạn muốn thanh toán theo cách nào?";
+  if (/dat hang|mua hang|don hang|gio hang/.test(normalized)) return "Dạ! Bạn có thể chọn món và thanh toán trực tiếp ngay trong chatbot, hoặc thêm vào giỏ hàng rồi bấm Đặt hàng nhé.";
+  if (/giao hang|phi ship|van chuyen|thoi gian giao/.test(normalized)) return "Dạ! Cửa hàng hiện chưa hiển thị phí hoặc thời gian giao hàng cụ thể. Bạn có thể gửi địa chỉ trong đơn để cửa hàng xác nhận.";
+  if (/doi tra|hoan tien|huy don/.test(normalized)) return "Dạ! Mình chưa có thông tin chính sách đổi trả hoặc hủy đơn. Bạn vui lòng liên hệ cửa hàng để được xác nhận.";
+  return "Dạ! Mình có thể giúp tìm sản phẩm, hướng dẫn đặt hàng và giải đáp về thanh toán. Bạn thử hỏi tên món cần tìm hoặc cách đặt đơn nhé.";
 }
 
 async function chat(request, env) {
@@ -41,6 +43,7 @@ async function chat(request, env) {
 
   const normalized = normalizeText(message);
   const capabilityQuestion = /ho tro gi|ho tro duoc gi|lam duoc gi|giup duoc gi/.test(normalized);
+  const onlinePaymentQuestion = /online|truc tuyen|vietqr|momo|vnpay/.test(normalized);
   const deliveryQuestion = /phi ship|phi giao|giao hang|van chuyen|thoi gian giao/.test(normalized);
   const productIntent = !deliveryQuestion && /\b(tim|mua|gia|goi y|san pham|mon|co ban|rau|cu|trai cay|thit|ca|gao|sua|banh)\b/.test(normalized);
   const ignored = new Set("ban minh toi muon can tim cho hoi xem co con hang khong giup voi la cac loai nao nao gia bao nhieu san pham san pham loai mon an mon ngon cua va hay".split(" "));
@@ -60,12 +63,14 @@ async function chat(request, env) {
 
   const history = Array.isArray(body.history) ? body.history.slice(-8).filter((entry) => ["user", "assistant"].includes(entry?.role) && typeof entry.content === "string").map((entry) => ({ role: entry.role, content: entry.content.slice(0, 500) })) : [];
   if (history.at(-1)?.role !== "user" || history.at(-1)?.content !== message) history.push({ role: "user", content: message });
-  let reply = capabilityQuestion ? "Mình có thể giúp bạn tìm sản phẩm còn hàng, xem giá, chọn món, hướng dẫn đặt hàng và giải đáp về thanh toán. Bạn muốn bắt đầu với việc nào?" : "";
+  let reply = onlinePaymentQuestion
+    ? fallbackChatReply(message, [], false)
+    : capabilityQuestion ? "Mình có thể giúp bạn tìm sản phẩm còn hàng, xem giá, chọn món, hướng dẫn đặt hàng và giải đáp về thanh toán. Bạn muốn bắt đầu với việc nào?" : "";
   if (env.AI && !reply) {
     try {
       const result = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
         messages: [
-          { role: "system", content: `Bạn là trợ lý cửa hàng thực phẩm Chợ Nhà, luôn trả lời bằng tiếng Việt tự nhiên, ngắn gọn, thân thiện và xưng mình/bạn. Bạn có thể giúp khách tìm sản phẩm, xem giá, chọn món, hướng dẫn thêm vào giỏ và đặt hàng, hoặc giải đáp phương thức thanh toán. Nếu khách hỏi bạn hỗ trợ gì, hãy nêu ngắn gọn các việc trên thay vì nói không có thông tin. Khách đặt hàng bằng cách thêm món vào giỏ, mở giỏ hàng, điền thông tin nhận hàng, chọn phương thức thanh toán rồi bấm Đặt hàng; đơn sẽ chờ cửa hàng xác nhận. Cửa hàng nhận thanh toán khi giao hàng hoặc chuyển khoản thủ công; đây chưa phải thanh toán trực tuyến. Chỉ tư vấn sản phẩm trong danh sách còn hàng bên dưới. Không tự bịa phí hoặc thời gian giao, chính sách đổi trả, hay thông tin liên hệ; nếu chưa biết thì nói rõ cửa hàng cần xác nhận. Không xác nhận hoặc thay đổi đơn hàng. Sản phẩm còn hàng phù hợp với câu hỏi: ${JSON.stringify(products)}.` },
+          { role: "system", content: `Bạn là trợ lý cửa hàng thực phẩm Chợ Nhà, luôn trả lời bằng tiếng Việt tự nhiên, ngắn gọn, thân thiện và xưng mình/bạn. Bạn có thể giúp khách tìm sản phẩm, xem giá, chọn món, hướng dẫn thêm vào giỏ và đặt hàng, hoặc giải đáp phương thức thanh toán. Nếu khách hỏi bạn hỗ trợ gì, hãy nêu ngắn gọn các việc trên thay vì nói không có thông tin. Khách chọn sản phẩm, chỉnh số lượng trong giỏ để xem báo giá, điền thông tin nhận hàng rồi chọn phương thức thanh toán. Cửa hàng hỗ trợ VietQR với số tiền và nội dung theo mã đơn; đơn chờ cửa hàng xác nhận thủ công sau khi kiểm tra tiền về, chưa có webhook tự động đối soát. Thanh toán khi nhận hàng và chuyển khoản thủ công vẫn khả dụng; MoMo và VNPay chưa khả dụng. Không nói VietQR đã được thanh toán nếu chưa có xác nhận của cửa hàng. Chỉ tư vấn sản phẩm trong danh sách còn hàng bên dưới. Không tự bịa phí hoặc thời gian giao, chính sách đổi trả, hay thông tin liên hệ; nếu chưa biết thì nói rõ cửa hàng cần xác nhận. Không xác nhận hoặc thay đổi đơn hàng. Sản phẩm còn hàng phù hợp với câu hỏi: ${JSON.stringify(products)}.` },
           ...history
         ],
         max_tokens: 220
@@ -74,6 +79,95 @@ async function chat(request, env) {
     } catch (exception) { console.error("Workers AI chat unavailable", exception); }
   }
   return json({ reply: reply || fallbackChatReply(message, products, productIntent), products });
+}
+
+async function telegramApi(env, method, payload) {
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000)
+  });
+  const result = await response.json();
+  if (!response.ok || result.ok !== true) throw new Error(`Telegram ${method} failed with HTTP ${response.status}.`);
+  return result.result;
+}
+
+async function notifyTelegramOrder(env, order, customer, items) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_ADMIN_CHAT_ID || !env.TELEGRAM_WEBHOOK_SECRET) return "not_configured";
+  const itemLines = items.map((item) => `• ${item.name} × ${item.quantity} — ${item.price * item.quantity} VND`).join("\n");
+  const text = [
+    "Chợ Nhà · yêu cầu thanh toán VietQR",
+    `Đơn #${order.id}`,
+    `Khách: ${customer.name.trim()}`,
+    `SĐT: ${customer.phone.trim()}`,
+    `Địa chỉ: ${customer.address ? customer.address.trim() : "Chưa cung cấp"}`,
+    "Sản phẩm:",
+    itemLines,
+    `Tổng tiền: ${order.total.toLocaleString("vi-VN")} VND`,
+    `Nội dung chuyển khoản: CHONHA${order.id}`
+  ].join("\n");
+  try {
+    await telegramApi(env, "sendMessage", {
+      chat_id: env.TELEGRAM_ADMIN_CHAT_ID,
+      text,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "✅ Duyệt thanh toán", callback_data: `pay:approve:${order.id}` },
+          { text: "❌ Từ chối", callback_data: `pay:reject:${order.id}` }
+        ]]
+      }
+    });
+    return "sent";
+  } catch (exception) {
+    console.error("Telegram order notification failed", exception.name);
+    return "failed";
+  }
+}
+
+async function telegramWebhook(request, env) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_ADMIN_CHAT_ID || !env.TELEGRAM_WEBHOOK_SECRET) return error("Telegram webhook chưa được cấu hình đầy đủ.", 503);
+  if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) return error("Webhook không hợp lệ.", 401);
+  const update = await readBody(request);
+  const callback = update?.callback_query;
+  if (!callback) return json({ ok: true });
+  const message = callback.message;
+  const trustedChat = String(message?.chat?.id || "") === String(env.TELEGRAM_ADMIN_CHAT_ID);
+  const trustedUser = String(callback.from?.id || "") === String(env.TELEGRAM_ADMIN_CHAT_ID);
+  const action = String(callback.data || "").match(/^pay:(approve|reject):([1-9]\d*)$/);
+  if (!trustedChat || !trustedUser || !action) return error("Thao tác duyệt không hợp lệ.", 403);
+
+  const orderId = Number(action[2]);
+  const order = await env.DB.prepare("SELECT id, payment_method, payment_status, status FROM orders WHERE id = ?").bind(orderId).first();
+  if (!order || order.payment_method !== "vietqr" || order.payment_status !== "pending" || order.status !== "pending") {
+    try { await telegramApi(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "Đơn này không còn chờ duyệt." }); }
+    catch (exception) { console.error("Telegram callback acknowledgement failed", exception.name); }
+    return json({ ok: true });
+  }
+
+  let result;
+  if (action[1] === "approve") {
+    result = await env.DB.prepare("UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ? AND payment_method = 'vietqr' AND payment_status = 'pending' AND status = 'pending'")
+      .bind(orderId).run();
+  } else {
+    const batch = await env.DB.batch([
+      env.DB.prepare("UPDATE orders SET status = 'cancelled', payment_status = 'unpaid', stock_released = 2 WHERE id = ? AND payment_method = 'vietqr' AND payment_status = 'pending' AND status = 'pending' AND stock_released = 0").bind(orderId),
+      env.DB.prepare("UPDATE products SET stock = stock + (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = ? AND oi.product_id = products.id) WHERE id IN (SELECT product_id FROM order_items WHERE order_id = ? AND product_id IS NOT NULL) AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND payment_method = 'vietqr' AND payment_status = 'unpaid' AND status = 'cancelled' AND stock_released = 2)").bind(orderId, orderId, orderId),
+      env.DB.prepare("UPDATE orders SET stock_released = 1 WHERE id = ? AND payment_method = 'vietqr' AND payment_status = 'unpaid' AND status = 'cancelled' AND stock_released = 2").bind(orderId)
+    ]);
+    result = batch[0];
+  }
+
+  const changed = result.meta.changes === 1;
+  const decision = action[1] === "approve" ? "Đã duyệt thanh toán; đơn đã xác nhận." : "Đã từ chối thanh toán; đơn đã hủy và tồn kho được hoàn lại.";
+  const text = changed ? `Chợ Nhà · ${decision}\nĐơn #${orderId}` : `Chợ Nhà · Đơn #${orderId} đã được xử lý trước đó.`;
+  try {
+    await telegramApi(env, "answerCallbackQuery", { callback_query_id: callback.id, text: changed ? decision : "Đơn đã được xử lý." });
+    await telegramApi(env, "editMessageText", { chat_id: message.chat.id, message_id: message.message_id, text });
+  } catch (exception) {
+    console.error("Telegram payment review update failed", exception.name);
+  }
+  return json({ ok: true });
 }
 
 async function readBody(request) {
@@ -85,16 +179,38 @@ async function requireAdmin(request, env) {
   return Boolean(env.ADMIN_TOKEN && token && token === env.ADMIN_TOKEN);
 }
 
+async function signOrderStatusToken(secret, orderId) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(String(orderId))));
+  return [...signature].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function api(request, env) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const method = request.method;
 
+  if (path === "/api/telegram/webhook" && method === "POST") return telegramWebhook(request, env);
   if (adminPath(path) && !(await requireAdmin(request, env))) return error("Bạn cần đăng nhập quản trị.", 401);
 
   if (path === "/api/health") return json({ ok: true });
 
   if (path === "/api/chat" && method === "POST") return chat(request, env);
+
+  const orderStatusMatch = path.match(/^\/api\/orders\/([1-9]\d*)$/);
+  if (orderStatusMatch && method === "GET") {
+    if (!hasOrderStatusSecret(env.ORDER_STATUS_SECRET)) return error("Kiểm tra trạng thái đơn chưa được cấu hình an toàn.", 503);
+    const orderId = Number(orderStatusMatch[1]);
+    const suppliedToken = request.headers.get("authorization")?.match(/^Bearer ([a-f0-9]{64})$/i)?.[1];
+    if (!suppliedToken) return error("Bạn không có quyền xem trạng thái đơn này.", 401);
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.ORDER_STATUS_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const signature = Uint8Array.from(suppliedToken.match(/.{2}/g), (byte) => Number.parseInt(byte, 16));
+    const authorized = await crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(String(orderId)));
+    if (!authorized) return error("Bạn không có quyền xem trạng thái đơn này.", 401);
+    const order = await env.DB.prepare("SELECT id, status, payment_status FROM orders WHERE id = ?")
+      .bind(orderId).first();
+    return order ? json(order) : error("Không tìm thấy đơn hàng.", 404);
+  }
 
   if (path === "/api/categories" && method === "GET") {
     const { results } = await env.DB.prepare("SELECT id, name, slug FROM categories ORDER BY name").all();
@@ -128,7 +244,12 @@ async function api(request, env) {
       if (!product || product.stock < quantity) return error(`Sản phẩm ${product?.name ?? "đã chọn"} không đủ tồn kho.`, 409);
       products.set(productId, product);
     }
-    const paymentMethod = ["cod", "bank_transfer"].includes(body.paymentMethod) ? body.paymentMethod : "cod";
+    const paymentMethod = body.paymentMethod || "cod";
+    if (!["cod", "bank_transfer", "vietqr"].includes(paymentMethod)) return error("Phương thức thanh toán này hiện chưa khả dụng. Vui lòng chọn VietQR hoặc thanh toán khi nhận hàng.");
+    if (paymentMethod === "vietqr" && ![env.VIETQR_BANK_ID, env.VIETQR_ACCOUNT_NUMBER, env.VIETQR_ACCOUNT_NAME].every((value) => typeof value === "string" && value.trim())) {
+      return error("VietQR chưa được cấu hình đầy đủ. Vui lòng chọn phương thức thanh toán khác.", 503);
+    }
+    const paymentStatus = paymentMethod === "cod" ? "unpaid" : "pending";
     const reserved = [];
     for (const [productId, quantity] of quantities) {
       const reservation = await env.DB.prepare("UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?")
@@ -145,8 +266,8 @@ async function api(request, env) {
     try {
       const customerResult = await env.DB.prepare("INSERT INTO customers (name, email, phone, address) VALUES (?, ?, ?, ?) ON CONFLICT(email, phone) DO UPDATE SET name = excluded.name, address = excluded.address RETURNING id")
         .bind(name.trim(), email.trim().toLowerCase(), phone.trim(), address.trim()).first();
-      orderId = await env.DB.prepare("INSERT INTO orders (customer_id, payment_method, total) VALUES (?, ?, 0) RETURNING id")
-        .bind(customerResult.id, paymentMethod).first();
+      orderId = await env.DB.prepare("INSERT INTO orders (customer_id, payment_method, payment_status, total) VALUES (?, ?, ?, 0) RETURNING id")
+        .bind(customerResult.id, paymentMethod, paymentStatus).first();
       let total = 0;
       for (const [productId, quantity] of quantities) {
         const product = products.get(productId);
@@ -155,7 +276,24 @@ async function api(request, env) {
           .bind(orderId.id, product.id, product.name, product.price, quantity).run();
       }
       await env.DB.prepare("UPDATE orders SET total = ? WHERE id = ?").bind(total, orderId.id).run();
-      return json({ id: orderId.id, total, status: "pending" }, 201);
+      let payment;
+      let telegramNotification;
+      if (paymentMethod === "vietqr") {
+        const qrUrl = new URL(`https://img.vietqr.io/image/${encodeURIComponent(env.VIETQR_BANK_ID)}-${encodeURIComponent(env.VIETQR_ACCOUNT_NUMBER)}-compact2.png`);
+        qrUrl.searchParams.set("amount", String(total));
+        qrUrl.searchParams.set("addInfo", `CHONHA${orderId.id}`);
+        qrUrl.searchParams.set("accountName", env.VIETQR_ACCOUNT_NAME.trim());
+        const order = { id: orderId.id, total };
+        const orderItems = [...quantities].map(([productId, quantity]) => ({
+          name: products.get(productId).name,
+          price: products.get(productId).price,
+          quantity
+        }));
+        telegramNotification = await notifyTelegramOrder(env, order, { name, phone, address }, orderItems);
+        payment = { method: "vietqr", status: paymentStatus, qrUrl: qrUrl.toString(), transferContent: `CHONHA${orderId.id}`, adminNotification: telegramNotification };
+      }
+      const statusToken = hasOrderStatusSecret(env.ORDER_STATUS_SECRET) ? await signOrderStatusToken(env.ORDER_STATUS_SECRET, orderId.id) : undefined;
+      return json({ id: orderId.id, total, status: "pending", statusToken, payment }, 201);
     } catch (exception) {
       if (orderId?.id) await env.DB.prepare("DELETE FROM orders WHERE id = ?").bind(orderId.id).run();
       for (const [reservedId, reservedQuantity] of reserved) {
@@ -226,6 +364,11 @@ async function api(request, env) {
   const orderMatch = path.match(/^\/api\/admin\/orders\/(\d+)$/);
   if (orderMatch && method === "PATCH") {
     const body = await readBody(request);
+    if (body?.paymentStatus !== undefined) {
+      if (!["unpaid", "pending", "paid"].includes(body.paymentStatus)) return error("Trạng thái thanh toán không hợp lệ.");
+      await env.DB.prepare("UPDATE orders SET payment_status = ? WHERE id = ?").bind(body.paymentStatus, Number(orderMatch[1])).run();
+      return json({ ok: true });
+    }
     const allowed = ["pending", "confirmed", "shipping", "completed", "cancelled"];
     if (!allowed.includes(body?.status)) return error("Trạng thái đơn hàng không hợp lệ.");
     await env.DB.prepare("UPDATE orders SET status = ? WHERE id = ?").bind(body.status, Number(orderMatch[1])).run();

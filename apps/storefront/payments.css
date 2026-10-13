@@ -1,0 +1,27 @@
+.payment-label{margin-top:3px;color:#626b60;font-size:11px;font-weight:600}
+.checkout-payment{display:grid;justify-items:center;gap:9px;margin-top:14px;padding:16px;border:1px solid var(--line);background:#fff}
+.checkout-payment[hidden]{display:none}
+.checkout-payment h3,.checkout-payment p{width:100%;margin:0}
+.checkout-payment h3{font-size:14px}
+.checkout-payment img{width:min(240px,100%);aspect-ratio:1;object-fit:contain}
+.checkout-payment p{font-size:11px;line-height:1.6}
+.checkout-payment .payment-notice{color:#697462}
+.payment-notice.payment-success{color:var(--green,#2b6140);font-weight:700}
+.payment-notice.payment-cancelled{color:#c0392b;font-weight:700}
+.chat-message{white-space:pre-line}
+.chat-cart-button{margin-top:9px;border:0;border-radius:20px;background:var(--green);padding:8px 12px;color:#fff;font:600 11px "DM Sans",sans-serif;cursor:pointer}
+.chat-checkout-items{display:grid;gap:8px;margin-top:10px}
+.chat-checkout-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px;align-items:center;padding:7px;border:1px solid var(--line);background:#fff}
+.chat-checkout-item>span{grid-column:1/-1;font-weight:600}
+.chat-checkout-item strong{justify-self:end}
+.chat-checkout-quantity{display:flex;align-items:center;gap:9px}
+.chat-checkout-quantity button{width:25px;height:25px;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--green);cursor:pointer}
+.chat-checkout-total{margin-top:4px}
+.chat-payment-form{display:grid;gap:8px;margin-top:10px}
+.chat-payment-form label{display:grid;gap:4px;font-size:10px}
+.chat-payment-form input,.chat-payment-form textarea{width:100%;min-height:36px;border:1px solid var(--line);border-radius:3px;background:#fff;padding:8px;color:var(--ink);font:12px "DM Sans",sans-serif}
+.chat-payment-form textarea{min-height:52px;resize:vertical}
+.chat-payment-form .chat-cart-button{justify-self:start}
+.chat-payment-status{color:#a24f32;font-size:11px}
+.chat-payment-qr{display:block;width:min(220px,100%);margin:10px auto;background:#fff}
+.chat-message:has(.chat-checkout-items),.chat-message:has(.chat-payment-form),.chat-message:has(.chat-payment-qr){max-width:100%}

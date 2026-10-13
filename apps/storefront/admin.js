@@ -2,6 +2,10 @@ const $ = (selector) => document.querySelector(selector);
 const money = (amount) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
 const date = (value) => new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(`${value.replace(" ", "T")}Z`));
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+const paymentMethodName = (value) => ({ cod: "Khi nhận hàng", bank_transfer: "Chuyển khoản", vietqr: "VietQR", momo: "MoMo", vnpay: "VNPay" })[value] || value;
+const paymentStatusControl = (order) => order.payment_method === "vietqr" && order.status === "cancelled" && order.payment_status === "unpaid"
+  ? "<span>Bị từ chối</span>"
+  : `<select class="status-select" data-payment-order="${order.id}" aria-label="Trạng thái thanh toán đơn ${order.id}">${[["unpaid","Chưa thanh toán"],["pending","Chờ thanh toán"],["paid","Đã nhận tiền"]].map(([value,label]) => `<option value="${value}" ${order.payment_status === value ? "selected" : ""}>${label}</option>`).join("")}</select>`;
 let token = sessionStorage.getItem("cho-nha-admin-token") || "";
 let data = { products: [], categories: [], orders: [], customers: [] };
 let activeTab = "orders";
@@ -37,7 +41,7 @@ function renderTab() {
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === activeTab));
   const target = $("#admin-content");
   if (activeTab === "orders") {
-    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>MÃ ĐƠN</th><th>KHÁCH HÀNG</th><th>SẢN PHẨM</th><th>TỔNG TIỀN</th><th>NGÀY ĐẶT</th><th>TRẠNG THÁI</th></tr></thead><tbody>${data.orders.map((order) => `<tr><td><strong>#${order.id}</strong></td><td>${escapeHtml(order.customer_name)}<br><span>${escapeHtml(order.phone)}</span></td><td>${escapeHtml(order.items || "—")}</td><td>${money(order.total)}</td><td>${date(order.created_at)}</td><td><select class="status-select" data-order="${order.id}">${[["pending","Chờ xác nhận"],["confirmed","Đã xác nhận"],["shipping","Đang giao"],["completed","Hoàn tất"],["cancelled","Đã hủy"]].map(([value,label]) => `<option value="${value}" ${order.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table>${data.orders.length ? "" : "<p class=\"empty-state\">Chưa có đơn hàng nào.</p>"}</div>`;
+    target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>MÃ ĐƠN</th><th>KHÁCH HÀNG</th><th>SẢN PHẨM</th><th>TỔNG TIỀN</th><th>THANH TOÁN</th><th>NGÀY ĐẶT</th><th>TRẠNG THÁI ĐƠN</th></tr></thead><tbody>${data.orders.map((order) => `<tr><td><strong>#${order.id}</strong></td><td>${escapeHtml(order.customer_name)}<br><span>${escapeHtml(order.phone)}</span></td><td>${escapeHtml(order.items || "—")}</td><td>${money(order.total)}</td><td>${escapeHtml(paymentMethodName(order.payment_method))}<br>${paymentStatusControl(order)}</td><td>${date(order.created_at)}</td><td><select class="status-select" data-order="${order.id}" aria-label="Trạng thái đơn ${order.id}">${[["pending","Chờ xác nhận"],["confirmed","Đã xác nhận"],["shipping","Đang giao"],["completed","Hoàn tất"],["cancelled","Đã hủy"]].map(([value,label]) => `<option value="${value}" ${order.status === value ? "selected" : ""}>${label}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table>${data.orders.length ? "" : "<p class=\"empty-state\">Chưa có đơn hàng nào.</p>"}</div>`;
   } else if (activeTab === "products") {
     target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>SẢN PHẨM</th><th>DANH MỤC</th><th>GIÁ</th><th>TỒN KHO</th><th></th></tr></thead><tbody>${data.products.map((product) => `<tr><td><strong>${escapeHtml(product.name)}</strong></td><td>${escapeHtml(product.category_name || "Chưa phân loại")}</td><td>${money(product.price)}</td><td>${product.stock}</td><td><div class="row-actions"><button data-edit="${product.id}">Sửa</button><button class="delete" data-delete-product="${product.id}">Xóa</button></div></td></tr>`).join("")}</tbody></table>${data.products.length ? "" : "<p class=\"empty-state\">Chưa có sản phẩm nào.</p>"}</div>`;
   } else if (activeTab === "categories") {
@@ -92,8 +96,11 @@ $("#admin-content").addEventListener("click", async (event) => {
 
 $("#admin-content").addEventListener("change", async (event) => {
   const select = event.target.closest("[data-order]");
-  if (!select) return;
-  try { await api(`/api/admin/orders/${select.dataset.order}`, { method: "PATCH", body: JSON.stringify({ status: select.value }) }); toast("Đã cập nhật trạng thái đơn hàng"); await loadDashboard(); }
+  const paymentSelect = event.target.closest("[data-payment-order]");
+  if (!select && !paymentSelect) return;
+  const orderId = select?.dataset.order || paymentSelect.dataset.paymentOrder;
+  const update = select ? { status: select.value } : { paymentStatus: paymentSelect.value };
+  try { await api(`/api/admin/orders/${orderId}`, { method: "PATCH", body: JSON.stringify(update) }); toast(select ? "Đã cập nhật trạng thái đơn hàng" : "Đã cập nhật trạng thái thanh toán"); await loadDashboard(); }
   catch (exception) { toast(exception.message); }
 });
 

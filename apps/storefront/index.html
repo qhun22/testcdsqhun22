@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/chatbot.css">
+  <link rel="stylesheet" href="/payments.css">
   <script src="/store.js" defer></script>
 </head>
 <body>
@@ -32,12 +33,12 @@
   <aside class="cart-drawer" id="cart-drawer" aria-label="Giỏ hàng" aria-hidden="true">
     <div class="drawer-heading"><div><p class="eyebrow">ĐÃ CHỌN CHO BỮA NGON</p><h2>Giỏ hàng <span id="drawer-count">(0)</span></h2></div><button class="icon-button" id="close-cart" aria-label="Đóng giỏ hàng">×</button></div>
     <div class="cart-items" id="cart-items"></div>
-    <div class="checkout-area"><div class="cart-total"><span>Tạm tính</span><strong id="cart-total">0 ₫</strong></div><form id="checkout-form" class="checkout-form"><h3>Thông tin nhận hàng</h3><input name="name" placeholder="Họ và tên" autocomplete="name" required><input name="phone" placeholder="Số điện thoại" autocomplete="tel" required><input name="email" type="email" placeholder="Email" autocomplete="email" required><textarea name="address" placeholder="Địa chỉ giao hàng" autocomplete="street-address" required></textarea><select name="paymentMethod" aria-label="Phương thức thanh toán"><option value="cod">Thanh toán khi nhận hàng</option><option value="bank_transfer">Chuyển khoản thủ công</option></select><button class="button-primary" type="submit">Đặt hàng <span>↗</span></button><p class="form-message" id="checkout-message" role="status"></p></form></div>
+    <div class="checkout-area"><div class="cart-total"><span>Tạm tính</span><strong id="cart-total">0 ₫</strong></div><form id="checkout-form" class="checkout-form"><h3>Thông tin nhận hàng</h3><input name="name" placeholder="Họ và tên" autocomplete="name" required><input name="phone" placeholder="Số điện thoại" autocomplete="tel" required><input name="email" type="email" placeholder="Email" autocomplete="email" required><textarea name="address" placeholder="Địa chỉ giao hàng" autocomplete="street-address" required></textarea><label class="payment-label" for="payment-method">Phương thức thanh toán</label><select id="payment-method" name="paymentMethod"><option value="cod">Thanh toán khi nhận hàng</option><option value="vietqr">Chuyển khoản VietQR</option><option value="bank_transfer">Chuyển khoản thủ công</option><option value="momo" disabled>MoMo — sắp hỗ trợ</option><option value="vnpay" disabled>VNPay — sắp hỗ trợ</option></select><button class="button-primary" type="submit">Đặt hàng <span>↗</span></button><p class="form-message" id="checkout-message" role="status"></p></form><section class="checkout-payment" id="checkout-payment" aria-live="polite" hidden></section></div>
   </aside>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <button class="chat-launcher" id="chat-launcher" type="button" aria-label="Mở trợ lý Chợ Nhà" aria-expanded="false" aria-controls="chat-panel"><span aria-hidden="true">✳</span><span class="chat-launcher-label">Hỏi Chợ Nhà</span></button>
   <section class="chat-panel" id="chat-panel" aria-label="Trợ lý Chợ Nhà" aria-hidden="true" hidden>
-    <header class="chat-header"><div class="chat-avatar" aria-hidden="true">cn.</div><div><h2>Trợ lý Chợ Nhà</h2><p><span></span> Sẵn sàng hỗ trợ</p></div><button class="chat-close" id="chat-close" type="button" aria-label="Đóng trò chuyện">×</button></header>
+    <header class="chat-header"><div class="chat-avatar" aria-hidden="true">cn.</div><div><h2>Trợ lý Chợ Nhà</h2><p><span></span> Sẵn sàng hỗ trợ</p></div><div class="chat-header-actions"><button class="chat-restart" id="chat-restart" type="button" aria-label="Làm mới phiên chat" title="Tạo phiên chat mới">↻</button><button class="chat-close" id="chat-close" type="button" aria-label="Đóng trò chuyện">×</button></div></header>
     <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-relevant="additions">
       <div class="chat-message assistant-message"><p>Chào bạn! Mình có thể giúp tìm món trong cửa hàng hoặc giải đáp về cách đặt hàng, thanh toán.</p></div>
     </div>

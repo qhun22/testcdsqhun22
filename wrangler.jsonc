@@ -12,6 +12,12 @@
   "ai": {
     "binding": "AI"
   },
+  "vars": {
+    "VIETQR_BANK_ID": "970415",
+    "VIETQR_ACCOUNT_NUMBER": "0975150984",
+    "VIETQR_ACCOUNT_NAME": "TRUONG QUANG HUY",
+    "TELEGRAM_ADMIN_CHAT_ID": "5032505212"
+  },
   "d1_databases": [
     {
       "binding": "DB",
