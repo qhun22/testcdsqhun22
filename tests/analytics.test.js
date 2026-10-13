@@ -91,15 +91,16 @@ test("storefront page view stores only daily country and OS aggregates", async (
   assert.doesNotMatch(DB.calls[0].sql, /ip|user.agent|cookie/i);
 });
 
-test("admin page views and static assets are not counted", async () => {
+test("storefront dashboard and home views count while admin pages and assets do not", async () => {
   const DB = makeAnalyticsDatabase();
   const tasks = [];
   const assets = { fetch: async () => new Response("asset") };
-  for (const path of ["/admin.html", "/admin.css", "/"]) {
+  for (const path of ["/admin.html", "/admin.css", "/dashboard", "/"]) {
     await worker.fetch(new Request(`https://shop.test${path}`, {
       headers: { accept: "text/html" }
     }), { DB, ASSETS: assets }, { waitUntil(promise) { tasks.push(promise); } });
   }
   await Promise.all(tasks);
-  assert.equal(DB.calls.length, 1);
+  assert.equal(DB.calls.length, 2);
+  assert.ok(DB.calls.every(({ sql }) => sql.includes("INSERT INTO pageview_daily")));
 });

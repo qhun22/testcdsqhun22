@@ -422,7 +422,7 @@ export default {
       catch (exception) { console.error(exception); return error("Máy chủ gặp lỗi, vui lòng thử lại.", 500); }
     }
     const response = await env.ASSETS.fetch(request);
-    if (request.method === "GET" && ["/", "/index.html"].includes(url.pathname) && request.headers.get("accept")?.includes("text/html")) {
+    if (request.method === "GET" && ["/", "/index.html", "/dashboard", "/dashboard/"].includes(url.pathname) && request.headers.get("accept")?.includes("text/html")) {
       ctx.waitUntil(recordPageView(request, env).catch((exception) => {
         console.error("Page-view analytics write failed", exception.name);
       }));
