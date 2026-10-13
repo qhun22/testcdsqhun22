@@ -35,7 +35,7 @@ Chatbot lưu hội thoại, nội dung đang nhập và tiến trình chọn hà
 
 Tab **Phân tích** trong quản trị thống kê lượt tải trang chủ theo ngày, quốc gia Cloudflare nhận diện và hệ điều hành phân loại từ user-agent. Dữ liệu được cộng gộp trong D1, không lưu IP, cookie, user-agent thô hay mã định danh khách; lượt xem không phải số khách duy nhất. Dữ liệu cũ hơn 90 ngày được xóa theo lịch chạy mỗi ngày. Do đây là thống kê tổng hợp trong D1, nó phù hợp quy mô cửa hàng vừa và nhỏ, không phải nền tảng big-data/streaming.
 
-Đăng nhập quản trị tiếp tục yêu cầu secret `ADMIN_TOKEN` và được lưu trong session của tab; không sử dụng mật khẩu mặc định `admin|123`. Chạy `npm.cmd run db:remote` để áp dụng migration analytics trước khi deploy.
+Đăng nhập quản trị tiếp tục yêu cầu secret `ADMIN_TOKEN` và được lưu trong session của tab; không sử dụng mật khẩu mặc định `admin|123`. Chạy `npm.cmd run db:remote` để áp dụng migration analytics trước khi deploy. Tab Phân tích có nút **Tạo dữ liệu demo** để tạo lại mẫu 30 ngày với nhiều quốc gia và hệ điều hành; lượt demo được lưu riêng, cộng vào biểu đồ/tổng số nhưng không xóa hoặc sửa lượt truy cập thật.
 
 ## Chức năng
 

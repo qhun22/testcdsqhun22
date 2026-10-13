@@ -51,7 +51,7 @@ function renderTab() {
   } else if (activeTab === "customers") {
     target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>KHÁCH HÀNG</th><th>LIÊN HỆ</th><th>ĐỊA CHỈ</th><th>SỐ ĐƠN</th><th>ĐÃ MUA</th></tr></thead><tbody>${data.customers.map((customer) => `<tr><td><strong>${escapeHtml(customer.name)}</strong></td><td>${escapeHtml(customer.email)}<br><span>${escapeHtml(customer.phone)}</span></td><td>${escapeHtml(customer.address)}</td><td>${customer.order_count}</td><td>${money(customer.lifetime_value)}</td></tr>`).join("")}</tbody></table>${data.customers.length ? "" : "<p class=\"empty-state\">Chưa có khách hàng nào.</p>"}</div>`;
   } else {
-    target.innerHTML = `<div class="analytics-heading"><h2>Lượt xem cửa hàng</h2><label>Khoảng thời gian <select id="analytics-days" aria-label="Khoảng thời gian phân tích"><option value="7">7 ngày</option><option value="30" selected>30 ngày</option><option value="90">90 ngày</option></select></label></div><p class="analytics-note">Thống kê lượt tải trang chủ theo ngày. Quốc gia lấy từ Cloudflare; hệ điều hành được phân loại từ trình duyệt. Không lưu IP, cookie, định danh người dùng hay thông tin cá nhân. Lượt xem không đại diện cho số khách duy nhất.</p><p id="analytics-loading" class="empty-state">Đang tải thống kê…</p><div id="analytics-results"></div>`;
+    target.innerHTML = `<div class="analytics-heading"><h2>Lượt xem cửa hàng</h2><div class="analytics-controls"><label>Khoảng thời gian <select id="analytics-days" aria-label="Khoảng thời gian phân tích"><option value="7">7 ngày</option><option value="30" selected>30 ngày</option><option value="90">90 ngày</option></select></label><button class="secondary-button" id="seed-analytics-demo" type="button">Tạo dữ liệu demo</button></div></div><p class="analytics-note">Thống kê lượt tải trang chủ theo ngày. Quốc gia lấy từ Cloudflare; hệ điều hành được phân loại từ trình duyệt. Không lưu IP, cookie, định danh người dùng hay thông tin cá nhân. Lượt xem không đại diện cho số khách duy nhất.</p><p id="analytics-loading" class="empty-state">Đang tải thống kê…</p><div id="analytics-results"></div>`;
     loadAnalytics(30);
   }
 }
@@ -76,7 +76,7 @@ async function loadAnalytics(days) {
     });
     const maxViews = Math.max(1, ...timeline.map((item) => item.views));
     $("#analytics-loading").hidden = true;
-    $("#analytics-results").innerHTML = `<div class="analytics-cards"><div class="analytics-card"><span>Lượt xem trong ${days} ngày</span><strong>${Number(result.views).toLocaleString("vi-VN")}</strong></div><div class="analytics-card"><span>Quốc gia/vùng lãnh thổ</span><strong>${result.countries.filter((item) => item.country !== "ZZ").length}</strong></div><div class="analytics-card"><span>Hệ điều hành</span><strong>${result.operatingSystems.length}</strong></div></div><section><h3>Dòng thời gian lượt xem</h3><div class="timeline" aria-label="Biểu đồ lượt xem theo ngày">${timeline.map((item) => `<div class="timeline-day" title="${item.day}: ${item.views} lượt xem"><span class="timeline-label">${item.day.slice(5)}</span><span class="timeline-bar" style="height:${Math.max(2, item.views / maxViews * 130)}px"></span></div>`).join("")}</div></section><div class="analytics-grid"><section><h3>Lượt xem theo quốc gia</h3><ul class="analytics-list">${countries || "<li>Chưa có dữ liệu</li>"}</ul></section><section><h3>Lượt xem theo hệ điều hành</h3><ul class="analytics-list">${systems || "<li>Chưa có dữ liệu</li>"}</ul></section></div>`;
+    $("#analytics-results").innerHTML = `${result.demoViews ? `<p class="analytics-demo-note">Đang gồm ${Number(result.demoViews).toLocaleString("vi-VN")} lượt giả lập. Bấm “Tạo dữ liệu demo” để thay bộ dữ liệu mẫu; số liệu thật được giữ nguyên.</p>` : ""}<div class="analytics-cards"><div class="analytics-card"><span>Lượt xem trong ${days} ngày</span><strong>${Number(result.views).toLocaleString("vi-VN")}</strong></div><div class="analytics-card"><span>Quốc gia/vùng lãnh thổ</span><strong>${result.countries.filter((item) => item.country !== "ZZ").length}</strong></div><div class="analytics-card"><span>Hệ điều hành</span><strong>${result.operatingSystems.length}</strong></div></div><section><h3>Dòng thời gian lượt xem</h3><div class="timeline" aria-label="Biểu đồ lượt xem theo ngày">${timeline.map((item) => `<div class="timeline-day" title="${item.day}: ${item.views} lượt xem"><span class="timeline-label">${item.day.slice(5)}</span><span class="timeline-bar" style="height:${Math.max(2, item.views / maxViews * 130)}px"></span></div>`).join("")}</div></section><div class="analytics-grid"><section><h3>Lượt xem theo quốc gia</h3><ul class="analytics-list">${countries || "<li>Chưa có dữ liệu</li>"}</ul></section><section><h3>Lượt xem theo hệ điều hành</h3><ul class="analytics-list">${systems || "<li>Chưa có dữ liệu</li>"}</ul></section></div>`;
   } catch (exception) {
     if (requestNumber !== analyticsRequest) return;
     $("#analytics-loading").hidden = true;
@@ -114,6 +114,19 @@ $("#logout").addEventListener("click", () => { token = ""; sessionStorage.remove
 document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => { activeTab = tab.dataset.tab; renderTab(); }));
 $("#admin-content").addEventListener("change", (event) => {
   if (event.target.id === "analytics-days") loadAnalytics(Number(event.target.value));
+});
+$("#admin-content").addEventListener("click", async (event) => {
+  const button = event.target.closest("#seed-analytics-demo");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/admin/analytics/demo", { method: "POST" });
+    toast(`Đã tạo ${result.views.toLocaleString("vi-VN")} lượt demo`);
+    await loadAnalytics(Number($("#analytics-days").value));
+  } catch (exception) {
+    toast(exception.message);
+    button.disabled = false;
+  }
 });
 $("#add-product").addEventListener("click", () => openProduct());
 $("#admin-content").addEventListener("click", async (event) => {

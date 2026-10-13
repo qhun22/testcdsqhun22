@@ -378,19 +378,47 @@ async function api(request, env) {
     const days = Number(url.searchParams.get("days") || 30);
     if (![7, 30, 90].includes(days)) return error("Khoảng thời gian phải là 7, 30 hoặc 90 ngày.");
     const since = `-${days - 1} days`;
-    const [summary, countries, systems, timeline] = await Promise.all([
-      env.DB.prepare("SELECT COALESCE(SUM(views), 0) AS views FROM pageview_daily WHERE day >= date('now', ?)").bind(since).first(),
-      env.DB.prepare("SELECT country, SUM(views) AS views FROM pageview_daily WHERE day >= date('now', ?) GROUP BY country ORDER BY views DESC LIMIT 10").bind(since).all(),
-      env.DB.prepare("SELECT operating_system AS name, SUM(views) AS views FROM pageview_daily WHERE day >= date('now', ?) GROUP BY operating_system ORDER BY views DESC").bind(since).all(),
-      env.DB.prepare("SELECT day, SUM(views) AS views FROM pageview_daily WHERE day >= date('now', ?) GROUP BY day ORDER BY day").bind(since).all()
+    const allViews = "(SELECT day, country, operating_system, views FROM pageview_daily UNION ALL SELECT day, country, operating_system, views FROM pageview_demo_daily)";
+    const [summary, demoSummary, countries, systems, timeline] = await Promise.all([
+      env.DB.prepare(`SELECT COALESCE(SUM(views), 0) AS views FROM ${allViews} WHERE day >= date('now', ?)`).bind(since).first(),
+      env.DB.prepare("SELECT COALESCE(SUM(views), 0) AS views FROM pageview_demo_daily WHERE day >= date('now', ?)").bind(since).first(),
+      env.DB.prepare(`SELECT country, SUM(views) AS views FROM ${allViews} WHERE day >= date('now', ?) GROUP BY country ORDER BY views DESC LIMIT 10`).bind(since).all(),
+      env.DB.prepare(`SELECT operating_system AS name, SUM(views) AS views FROM ${allViews} WHERE day >= date('now', ?) GROUP BY operating_system ORDER BY views DESC`).bind(since).all(),
+      env.DB.prepare(`SELECT day, SUM(views) AS views FROM ${allViews} WHERE day >= date('now', ?) GROUP BY day ORDER BY day`).bind(since).all()
     ]);
     return json({
       days,
       views: summary.views,
+      demoViews: demoSummary.views,
       countries: countries.results,
       operatingSystems: systems.results,
       timeline: timeline.results
     });
+  }
+
+  if (path === "/api/admin/analytics/demo" && method === "POST") {
+    const countrySystems = [
+      ["VN", "Windows"], ["VN", "Android"], ["VN", "iOS"], ["VN", "Khác"],
+      ["US", "Windows"], ["US", "macOS"], ["US", "iOS"],
+      ["JP", "Windows"], ["JP", "Android"], ["JP", "iOS"],
+      ["SG", "macOS"], ["SG", "iOS"], ["TH", "Android"],
+      ["TH", "Windows"], ["FR", "iOS"], ["DE", "Linux"],
+      ["AU", "macOS"], ["CA", "Windows"], ["KR", "Android"]
+    ];
+    const statements = [env.DB.prepare("DELETE FROM pageview_demo_daily")];
+    let totalViews = 0;
+    for (let offset = 29; offset >= 0; offset -= 1) {
+      const day = new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+      const values = countrySystems.flatMap(([country, operatingSystem], index) => {
+        const views = 3 + ((offset * 7 + index * 11) % 38);
+        totalViews += views;
+        return [day, country, operatingSystem, "home", views];
+      });
+      const rows = countrySystems.map(() => "(?, ?, ?, ?, ?)").join(", ");
+      statements.push(env.DB.prepare(`INSERT INTO pageview_demo_daily (day, country, operating_system, page, views) VALUES ${rows}`).bind(...values));
+    }
+    await env.DB.batch(statements);
+    return json({ ok: true, days: 30, countries: 10, operatingSystems: 6, views: totalViews });
   }
 
   if (path === "/api/admin/products" && method === "GET") {
@@ -475,7 +503,10 @@ export default {
   },
   async scheduled(_event, env) {
     try {
-      await env.DB.prepare("DELETE FROM pageview_daily WHERE day < date('now', '-90 days')").run();
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM pageview_daily WHERE day < date('now', '-90 days')"),
+        env.DB.prepare("DELETE FROM pageview_demo_daily WHERE day < date('now', '-90 days')")
+      ]);
     } catch (exception) {
       console.error("Page-view analytics retention cleanup failed", exception.name);
     }

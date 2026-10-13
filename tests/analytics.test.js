@@ -6,6 +6,10 @@ function makeAnalyticsDatabase() {
   const calls = [];
   return {
     calls,
+    async batch(statements) {
+      calls.push({ sql: "BATCH", statements });
+      return statements.map(() => ({ success: true }));
+    },
     prepare(sql) {
       const statement = {
         sql,
@@ -56,8 +60,38 @@ test("analytics API returns aggregated counts for an allowed date range", async 
   assert.deepEqual(result.countries, [{ country: "VN", views: 20 }, { country: "ZZ", views: 7 }]);
   assert.deepEqual(result.operatingSystems, [{ name: "Android", views: 15 }, { name: "Windows", views: 12 }]);
   assert.equal(result.timeline[0].day, "2026-10-13");
-  assert.equal(DB.calls.length, 4);
+  assert.equal(DB.calls.length, 5);
   assert.ok(DB.calls.every(({ values }) => values[0] === "-29 days"));
+});
+
+test("analytics demo endpoint requires admin authentication", async () => {
+  const DB = makeAnalyticsDatabase();
+  const response = await worker.fetch(new Request("https://shop.test/api/admin/analytics/demo", { method: "POST" }), {
+    DB,
+    ADMIN_TOKEN: "test-admin-token"
+  });
+  assert.equal(response.status, 401);
+  assert.equal(DB.calls.length, 0);
+});
+
+test("analytics demo replaces only demo rows with a broad 30-day sample", async () => {
+  const DB = makeAnalyticsDatabase();
+  const response = await worker.fetch(new Request("https://shop.test/api/admin/analytics/demo", {
+    method: "POST",
+    headers: { authorization: `Bearer ${["test", "admin", "token"].join("-")}` }
+  }), { DB, ADMIN_TOKEN: "test-admin-token" });
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(result.days, 30);
+  assert.equal(result.countries, 10);
+  assert.equal(result.operatingSystems, 6);
+  assert.ok(result.views > 0);
+  assert.equal(DB.calls.length, 1);
+  assert.equal(DB.calls[0].statements.length, 31);
+  assert.match(DB.calls[0].statements[0].sql, /DELETE FROM pageview_demo_daily/);
+  assert.doesNotMatch(DB.calls[0].statements[0].sql, /pageview_daily/);
+  assert.ok(DB.calls[0].statements.slice(1).every(({ sql }) => sql.includes("INSERT INTO pageview_demo_daily")));
+  assert.ok(DB.calls[0].statements.every(({ values }) => !values?.some((value) => value === "pageview_daily")));
 });
 
 test("analytics API rejects unbounded or unsupported ranges", async () => {
