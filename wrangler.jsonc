@@ -38,8 +38,8 @@
   ],
   "analytics_engine_datasets": [
     {
-      "binding": "ANALYTICS",
-      "dataset": "cho_nha_events"
+      "binding": "ANALYTICS_ENGINE",
+      "dataset": "cho_nha_analytics"
     }
   ]
 }

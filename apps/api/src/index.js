@@ -76,10 +76,10 @@ async function sinkToR2(env, structuredEvent) {
 
 // Tầng Sink 2: ghi vào Analytics Engine (Basin / Data Catalog — time-series)
 function sinkToAnalyticsEngine(env, structuredEvent) {
-  if (!env.ANALYTICS) return;
+  if (!env.ANALYTICS_ENGINE) return;
   try {
     // Analytics Engine writeDataPoint: blobs = labels, doubles = metrics
-    env.ANALYTICS.writeDataPoint({
+    env.ANALYTICS_ENGINE.writeDataPoint({
       blobs: [
         structuredEvent.type,       // blob1: loại sự kiện
         structuredEvent.country,    // blob2: quốc gia
