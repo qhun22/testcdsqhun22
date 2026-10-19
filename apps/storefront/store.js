@@ -49,6 +49,7 @@ function sendChatbotEvent(message, answer) {
   const payload = {
     type: "chatbot_message",
     messageLen: message.length,
+    messagePreview: message.slice(0, 80),
     hasProductResult: Array.isArray(answer?.products) && answer.products.length > 0,
     sessionId: String(chatSession.generation || 0)
   };

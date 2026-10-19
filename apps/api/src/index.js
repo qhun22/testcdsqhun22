@@ -36,92 +36,115 @@ function randomTransferCode() {
   return chars.join("");
 }
 
-// ─── Big Data Pipeline: Stream → Pipeline → Sink → Basin ─────────────────────
+// ─── Big Data Pipeline: Stream → Pipeline → Sink → Basin Catalog ─────────────
+//
+// Kiến trúc:
+//   [Website/Chatbot] → POST /api/events          (Stream: HTTP endpoint)
+//   → pipeline()                                  (Pipeline: transform + enrich)
+//   → sinkToR2()      R2 phân vùng Iceberg-style  (Sink: Data Lake raw storage)
+//   → sinkToAnalyticsEngine()                     (Basin: time-series catalog)
+//   → sinkChatbotToD1()                           (Basin: structured SQL query)
+//
+// R2 Data Catalog (Basin Catalog) đã bật tại:
+//   https://catalog.cloudflarestorage.com/c0569221e44f432f6669b8df70446872/cho-nha-data-lake
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Tầng Pipeline: validate và enrich raw event thành structured event
+// Tầng PIPELINE: validate và enrich raw event gửi từ frontend thành structured event
 function pipeline(rawEvent, request) {
   const country = /^[A-Z]{2}$/.test(request.cf?.country || "") ? request.cf.country : "ZZ";
   const os = operatingSystem(request.headers.get("user-agent") || "");
   const ts = new Date().toISOString();
   const type = String(rawEvent?.type || "");
   if (!["page_view", "chatbot_message"].includes(type)) return null;
-  const base = { type, ts, country, os, ip_hash: "" };
+
   if (type === "page_view") {
-    return { ...base, page: "home" };
+    return { type, ts, country, os, page: "home" };
   }
-  // chatbot_message
+
+  // chatbot_message — lưu thêm preview nội dung (tối đa 80 ký tự)
   const messageLen = Math.min(500, Math.max(0, Number(rawEvent?.messageLen) || 0));
   const hasProductResult = rawEvent?.hasProductResult ? 1 : 0;
   const sessionId = String(rawEvent?.sessionId || "").slice(0, 64);
-  return { ...base, messageLen, hasProductResult, sessionId };
+  const messagePreview = String(rawEvent?.messagePreview || "").slice(0, 80);
+  return { type, ts, country, os, messageLen, hasProductResult, sessionId, messagePreview };
 }
 
-// Tầng Sink 1: ghi raw JSONL vào R2 (Data Lake) — phân vùng theo year/month/day/hour
+// Tầng SINK 1 — R2 Data Lake (Basin Catalog đã bật / Apache Iceberg-style)
+// Phân vùng key: events/type=.../year=.../month=.../day=.../hour=.../<ts>.ndjson
+// Mỗi object = 1 NDJSON record → Iceberg query engine (Spark, PyIceberg) có thể đọc trực tiếp
 async function sinkToR2(env, structuredEvent) {
   if (!env.DATA_LAKE) return;
   const now = new Date(structuredEvent.ts);
-  const year = now.getUTCFullYear();
+  const year  = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(now.getUTCDate()).padStart(2, "0");
-  const hour = String(now.getUTCHours()).padStart(2, "0");
-  // Key phân vùng: events/type=page_view/year=2026/month=10/day=19/hour=14/<ts>.jsonl
-  const key = `events/type=${structuredEvent.type}/year=${year}/month=${month}/day=${day}/hour=${hour}/${structuredEvent.ts.replace(/[:.]/g, "-")}.jsonl`;
+  const day   = String(now.getUTCDate()).padStart(2, "0");
+  const hour  = String(now.getUTCHours()).padStart(2, "0");
+  const safeTs = structuredEvent.ts.replace(/[:.]/g, "-");
+  const key = `events/type=${structuredEvent.type}/year=${year}/month=${month}/day=${day}/hour=${hour}/${safeTs}.ndjson`;
   const line = JSON.stringify(structuredEvent) + "\n";
   try {
-    await env.DATA_LAKE.put(key, line, { httpMetadata: { contentType: "application/x-ndjson" } });
+    await env.DATA_LAKE.put(key, line, {
+      httpMetadata: { contentType: "application/x-ndjson" },
+      customMetadata: {
+        event_type: structuredEvent.type,
+        country: structuredEvent.country,
+        os: structuredEvent.os
+      }
+    });
   } catch (exception) {
     console.error("R2 sink failed", exception.name);
   }
 }
 
-// Tầng Sink 2: ghi vào Analytics Engine (Basin / Data Catalog — time-series)
+// Tầng SINK 2 — Analytics Engine (Basin: time-series catalog, query bằng SQL trong Dashboard)
+// Schema: blob1=type, blob2=country, blob3=os, blob4=page
+//         double1=count, double2=messageLen, double3=hasProductResult
 function sinkToAnalyticsEngine(env, structuredEvent) {
   if (!env.ANALYTICS_ENGINE) return;
   try {
-    // Analytics Engine writeDataPoint: blobs = labels, doubles = metrics
     env.ANALYTICS_ENGINE.writeDataPoint({
       blobs: [
-        structuredEvent.type,       // blob1: loại sự kiện
-        structuredEvent.country,    // blob2: quốc gia
-        structuredEvent.os,         // blob3: hệ điều hành
-        structuredEvent.page || ""  // blob4: tên trang (page_view) hoặc rỗng
+        structuredEvent.type,
+        structuredEvent.country,
+        structuredEvent.os,
+        structuredEvent.page || ""
       ],
       doubles: [
-        1,                                          // double1: count
-        structuredEvent.messageLen || 0,            // double2: độ dài tin nhắn
-        structuredEvent.hasProductResult || 0       // double3: có kết quả sản phẩm không
+        1,
+        structuredEvent.messageLen || 0,
+        structuredEvent.hasProductResult || 0
       ],
-      indexes: [structuredEvent.type]               // index để filter nhanh
+      indexes: [structuredEvent.type]
     });
   } catch (exception) {
     console.error("Analytics Engine sink failed", exception.name);
   }
 }
 
-// Tầng Sink 3: ghi structured chatbot event vào D1 (Basin structured query)
+// Tầng SINK 3 — D1 chatbot_events (Basin: structured SQL để hiện trên Admin Dashboard)
 async function sinkChatbotToD1(env, structuredEvent) {
   if (structuredEvent.type !== "chatbot_message") return;
   try {
     await env.DB.prepare(
-      "INSERT INTO chatbot_events (ts, country, operating_system, message_len, has_product_result, session_id) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO chatbot_events (ts, country, operating_system, message_len, has_product_result, session_id, message_preview) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ).bind(
       structuredEvent.ts,
       structuredEvent.country,
       structuredEvent.os,
       structuredEvent.messageLen,
       structuredEvent.hasProductResult,
-      structuredEvent.sessionId
+      structuredEvent.sessionId,
+      structuredEvent.messagePreview
     ).run();
   } catch (exception) {
     console.error("D1 chatbot sink failed", exception.name);
   }
 }
 
-// Entry point cho toàn bộ pipeline: nhận raw event, chạy qua tất cả các Sink
+// Entry point: nhận raw event từ Stream, chạy qua Pipeline → fan-out 3 Sink song song
 async function runPipeline(rawEvent, request, env) {
   const structured = pipeline(rawEvent, request);
   if (!structured) return;
-  // Chạy song song cả 3 sink
   await Promise.all([
     sinkToR2(env, structured),
     Promise.resolve(sinkToAnalyticsEngine(env, structured)),
@@ -528,21 +551,25 @@ async function api(request, env, ctx) {
   }
 
   if (path === "/api/admin/analytics/chatbot" && method === "GET") {
-    const hours = 24;
-    const since = new Date(Date.now() - hours * 3_600_000).toISOString();
-    const [total, byCountry, byOs, byHour] = await Promise.all([
-      env.DB.prepare("SELECT COUNT(*) AS messages, SUM(has_product_result) AS product_hits FROM chatbot_events WHERE ts >= ?").bind(since).first(),
-      env.DB.prepare("SELECT country, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY country ORDER BY messages DESC LIMIT 10").bind(since).all(),
-      env.DB.prepare("SELECT operating_system AS name, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY operating_system ORDER BY messages DESC").bind(since).all(),
-      env.DB.prepare("SELECT strftime('%H', ts) AS hour, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY hour ORDER BY hour").bind(since).all()
+    const since24h = new Date(Date.now() - 24 * 3_600_000).toISOString();
+    const since1h  = new Date(Date.now() -  1 * 3_600_000).toISOString();
+    const [total, byCountry, byOs, byHour, recent, pageViews24h] = await Promise.all([
+      env.DB.prepare("SELECT COUNT(*) AS messages, COALESCE(SUM(has_product_result),0) AS product_hits FROM chatbot_events WHERE ts >= ?").bind(since24h).first(),
+      env.DB.prepare("SELECT country, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY country ORDER BY messages DESC LIMIT 10").bind(since24h).all(),
+      env.DB.prepare("SELECT operating_system AS name, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY operating_system ORDER BY messages DESC").bind(since24h).all(),
+      env.DB.prepare("SELECT strftime('%H', ts) AS hour, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY hour ORDER BY hour").bind(since24h).all(),
+      env.DB.prepare("SELECT ts, country, operating_system, message_len, has_product_result, message_preview FROM chatbot_events WHERE ts >= ? ORDER BY ts DESC LIMIT 20").bind(since1h).all(),
+      env.DB.prepare("SELECT COALESCE(SUM(views),0) AS views FROM pageview_daily WHERE day >= date('now','-1 day')").first()
     ]);
     return json({
-      hours,
+      hours: 24,
       messages: total?.messages || 0,
       productHits: total?.product_hits || 0,
+      pageViews24h: pageViews24h?.views || 0,
       countries: byCountry.results,
       operatingSystems: byOs.results,
-      timeline: byHour.results
+      timeline: byHour.results,
+      recentMessages: recent.results
     });
   }
 

@@ -94,16 +94,72 @@ async function loadChatbotAnalytics() {
   try {
     const result = await api("/api/admin/analytics/chatbot");
     loading.hidden = true;
-    const byCountry = (result.countries || []).map((item) => `<li><span>${item.country === "ZZ" ? "Không xác định" : escapeHtml(item.country)}</span><strong>${Number(item.messages).toLocaleString("vi-VN")}</strong></li>`).join("");
-    const byOs = (result.operatingSystems || []).map((item) => `<li><span>${escapeHtml(item.name)}</span><strong>${Number(item.messages).toLocaleString("vi-VN")}</strong></li>`).join("");
+
+    const byCountry = (result.countries || []).map((item) =>
+      `<li><span>${item.country === "ZZ" ? "Không xác định" : escapeHtml(item.country)}</span><strong>${Number(item.messages).toLocaleString("vi-VN")} tin nhắn</strong></li>`
+    ).join("") || "<li>Chưa có dữ liệu</li>";
+
+    const byOs = (result.operatingSystems || []).map((item) =>
+      `<li><span>${escapeHtml(item.name)}</span><strong>${Number(item.messages).toLocaleString("vi-VN")} tin nhắn</strong></li>`
+    ).join("") || "<li>Chưa có dữ liệu</li>";
+
     const hourlyMap = new Map((result.timeline || []).map((item) => [String(item.hour).padStart(2, "0"), Number(item.messages)]));
     const maxMsg = Math.max(1, ...hourlyMap.values());
     const hourlyBars = Array.from({ length: 24 }, (_, h) => {
       const label = String(h).padStart(2, "0");
       const count = hourlyMap.get(label) || 0;
-      return `<div class="timeline-day" title="${label}:00 — ${count} tin nhắn"><span class="timeline-label">${label}h</span><span class="timeline-bar" style="height:${Math.max(2, count / maxMsg * 130)}px"></span></div>`;
+      return `<div class="timeline-day" title="${label}:00 UTC — ${count} tin nhắn"><span class="timeline-label">${label}h</span><span class="timeline-bar chatbot-bar" style="height:${Math.max(2, count / maxMsg * 130)}px"></span></div>`;
     }).join("");
-    results.innerHTML = `<div class="analytics-cards"><div class="analytics-card"><span>Tin nhắn trong 24h</span><strong>${Number(result.messages).toLocaleString("vi-VN")}</strong></div><div class="analytics-card"><span>Tìm được sản phẩm</span><strong>${Number(result.productHits).toLocaleString("vi-VN")}</strong></div><div class="analytics-card"><span>Pipeline</span><strong>Stream→R2+D1</strong></div></div><section><h3>Phân bổ theo giờ (UTC)</h3><div class="timeline" aria-label="Tin nhắn chatbot theo giờ">${hourlyBars}</div></section><div class="analytics-grid"><section><h3>Quốc gia</h3><ul class="analytics-list">${byCountry || "<li>Chưa có dữ liệu</li>"}</ul></section><section><h3>Hệ điều hành</h3><ul class="analytics-list">${byOs || "<li>Chưa có dữ liệu</li>"}</ul></section></div>`;
+
+    const recentRows = (result.recentMessages || []).map((item) => {
+      const ts = new Date(item.ts).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Ho_Chi_Minh" });
+      const osIcon = { Android: "🤖", iOS: "🍎", Windows: "🪟", macOS: "🍏", Linux: "🐧" }[item.operating_system] || "💻";
+      const hit = item.has_product_result ? `<span class="chatbot-hit">✓ sp</span>` : "";
+      return `<tr><td>${ts}</td><td>${item.country === "ZZ" ? "—" : escapeHtml(item.country)}</td><td>${osIcon} ${escapeHtml(item.operating_system)}</td><td class="chatbot-preview">${escapeHtml(item.message_preview || "—")}${hit}</td></tr>`;
+    }).join("") || `<tr><td colspan="4" style="color:#7b8277">Chưa có tin nhắn trong 1 giờ qua</td></tr>`;
+
+    const hitRate = result.messages > 0 ? Math.round(result.productHits / result.messages * 100) : 0;
+    results.innerHTML = `
+      <div class="analytics-cards">
+        <div class="analytics-card">
+          <span>Lượt truy cập 24h (trang chủ)</span>
+          <strong>${Number(result.pageViews24h).toLocaleString("vi-VN")}</strong>
+        </div>
+        <div class="analytics-card">
+          <span>Tin nhắn chatbot 24h</span>
+          <strong>${Number(result.messages).toLocaleString("vi-VN")}</strong>
+        </div>
+        <div class="analytics-card">
+          <span>Tìm được sản phẩm</span>
+          <strong>${Number(result.productHits).toLocaleString("vi-VN")} <small style="font-size:14px;font-weight:400">(${hitRate}%)</small></strong>
+        </div>
+      </div>
+      <div class="pipeline-badge">
+        Stream <span>→</span> Pipeline <span>→</span> Sink (R2 NDJSON + D1) <span>→</span> Basin Catalog (Iceberg)
+      </div>
+      <section>
+        <h3>Phân bổ tin nhắn theo giờ (UTC)</h3>
+        <div class="timeline" aria-label="Chatbot tin nhắn theo giờ">${hourlyBars}</div>
+      </section>
+      <div class="analytics-grid">
+        <section>
+          <h3>Quốc gia người dùng</h3>
+          <ul class="analytics-list">${byCountry}</ul>
+        </section>
+        <section>
+          <h3>Hệ điều hành (iOS / Android / PC)</h3>
+          <ul class="analytics-list">${byOs}</ul>
+        </section>
+      </div>
+      <section class="chatbot-recent">
+        <h3>Tin nhắn gần nhất (1 giờ qua) — từ Data Lake Pipeline</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>GIỜ (GMT+7)</th><th>QUỐC GIA</th><th>THIẾT BỊ</th><th>NỘI DUNG</th></tr></thead>
+            <tbody>${recentRows}</tbody>
+          </table>
+        </div>
+      </section>`;
   } catch (exception) {
     if (!loading || !results) return;
     loading.hidden = true;
