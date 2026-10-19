@@ -51,8 +51,9 @@ function renderTab() {
   } else if (activeTab === "customers") {
     target.innerHTML = `<div class="table-wrap"><table><thead><tr><th>KHÁCH HÀNG</th><th>LIÊN HỆ</th><th>ĐỊA CHỈ</th><th>SỐ ĐƠN</th><th>ĐÃ MUA</th></tr></thead><tbody>${data.customers.map((customer) => `<tr><td><strong>${escapeHtml(customer.name)}</strong></td><td>${escapeHtml(customer.email)}<br><span>${escapeHtml(customer.phone)}</span></td><td>${escapeHtml(customer.address)}</td><td>${customer.order_count}</td><td>${money(customer.lifetime_value)}</td></tr>`).join("")}</tbody></table>${data.customers.length ? "" : "<p class=\"empty-state\">Chưa có khách hàng nào.</p>"}</div>`;
   } else {
-    target.innerHTML = `<div class="analytics-heading"><h2>Lượt xem cửa hàng</h2><div class="analytics-controls"><label>Khoảng thời gian <select id="analytics-days" aria-label="Khoảng thời gian phân tích"><option value="7">7 ngày</option><option value="30" selected>30 ngày</option><option value="90">90 ngày</option></select></label><button class="secondary-button" id="seed-analytics-demo" type="button">Tạo dữ liệu demo</button></div></div><p class="analytics-note">Thống kê lượt tải trang chủ theo ngày. Quốc gia lấy từ Cloudflare; hệ điều hành được phân loại từ trình duyệt. Không lưu IP, cookie, định danh người dùng hay thông tin cá nhân. Lượt xem không đại diện cho số khách duy nhất.</p><p id="analytics-loading" class="empty-state">Đang tải thống kê…</p><div id="analytics-results"></div>`;
+    target.innerHTML = `<div class="analytics-heading"><h2>Lượt xem cửa hàng</h2><div class="analytics-controls"><label>Khoảng thời gian <select id="analytics-days" aria-label="Khoảng thời gian phân tích"><option value="7">7 ngày</option><option value="30" selected>30 ngày</option><option value="90">90 ngày</option></select></label><button class="secondary-button" id="seed-analytics-demo" type="button">Tạo dữ liệu demo</button></div></div><p class="analytics-note">Thống kê lượt tải trang chủ theo ngày. Quốc gia lấy từ Cloudflare; hệ điều hành được phân loại từ trình duyệt. Không lưu IP, cookie, định danh người dùng hay thông tin cá nhân. Lượt xem không đại diện cho số khách duy nhất.</p><p id="analytics-loading" class="empty-state">Đang tải thống kê…</p><div id="analytics-results"></div><hr class="analytics-divider"><div class="analytics-heading"><h2>Tương tác Chatbot · 24h qua</h2><p class="analytics-note">Thống kê tin nhắn chatbot trong 24 giờ qua từ Data Lake Pipeline. Dữ liệu raw được đẩy qua Stream → Pipeline → Sink (R2 + D1) → Basin (D1 query).</p></div><p id="chatbot-loading" class="empty-state">Đang tải thống kê chatbot…</p><div id="chatbot-results"></div>`;
     loadAnalytics(30);
+    loadChatbotAnalytics();
   }
 }
 
@@ -81,6 +82,32 @@ async function loadAnalytics(days) {
     if (requestNumber !== analyticsRequest) return;
     $("#analytics-loading").hidden = true;
     $("#analytics-results").innerHTML = `<p class="analytics-error">${escapeHtml(exception.message)}</p>`;
+  }
+}
+
+async function loadChatbotAnalytics() {
+  const loading = $("#chatbot-loading");
+  const results = $("#chatbot-results");
+  if (!loading || !results) return;
+  loading.hidden = false;
+  results.replaceChildren();
+  try {
+    const result = await api("/api/admin/analytics/chatbot");
+    loading.hidden = true;
+    const byCountry = (result.countries || []).map((item) => `<li><span>${item.country === "ZZ" ? "Không xác định" : escapeHtml(item.country)}</span><strong>${Number(item.messages).toLocaleString("vi-VN")}</strong></li>`).join("");
+    const byOs = (result.operatingSystems || []).map((item) => `<li><span>${escapeHtml(item.name)}</span><strong>${Number(item.messages).toLocaleString("vi-VN")}</strong></li>`).join("");
+    const hourlyMap = new Map((result.timeline || []).map((item) => [String(item.hour).padStart(2, "0"), Number(item.messages)]));
+    const maxMsg = Math.max(1, ...hourlyMap.values());
+    const hourlyBars = Array.from({ length: 24 }, (_, h) => {
+      const label = String(h).padStart(2, "0");
+      const count = hourlyMap.get(label) || 0;
+      return `<div class="timeline-day" title="${label}:00 — ${count} tin nhắn"><span class="timeline-label">${label}h</span><span class="timeline-bar" style="height:${Math.max(2, count / maxMsg * 130)}px"></span></div>`;
+    }).join("");
+    results.innerHTML = `<div class="analytics-cards"><div class="analytics-card"><span>Tin nhắn trong 24h</span><strong>${Number(result.messages).toLocaleString("vi-VN")}</strong></div><div class="analytics-card"><span>Tìm được sản phẩm</span><strong>${Number(result.productHits).toLocaleString("vi-VN")}</strong></div><div class="analytics-card"><span>Pipeline</span><strong>Stream→R2+D1</strong></div></div><section><h3>Phân bổ theo giờ (UTC)</h3><div class="timeline" aria-label="Tin nhắn chatbot theo giờ">${hourlyBars}</div></section><div class="analytics-grid"><section><h3>Quốc gia</h3><ul class="analytics-list">${byCountry || "<li>Chưa có dữ liệu</li>"}</ul></section><section><h3>Hệ điều hành</h3><ul class="analytics-list">${byOs || "<li>Chưa có dữ liệu</li>"}</ul></section></div>`;
+  } catch (exception) {
+    if (!loading || !results) return;
+    loading.hidden = true;
+    results.innerHTML = `<p class="analytics-error">${escapeHtml(exception.message)}</p>`;
   }
 }
 

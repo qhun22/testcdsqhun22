@@ -22,5 +22,12 @@
       "database_id": "14fdc297-226d-44ea-a353-5370979bffd9",
       "migrations_dir": "migrations"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DATA_LAKE",
+      "bucket_name": "cho-nha-data-lake",
+      "preview_bucket_name": "cho-nha-data-lake-preview"
+    }
   ]
 }

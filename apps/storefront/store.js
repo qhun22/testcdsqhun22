@@ -44,6 +44,21 @@ async function api(path, options) {
   return data;
 }
 
+// Gửi raw chatbot event vào Stream endpoint → Pipeline → Sink (R2 + D1 + Analytics Engine)
+function sendChatbotEvent(message, answer) {
+  const payload = {
+    type: "chatbot_message",
+    messageLen: message.length,
+    hasProductResult: Array.isArray(answer?.products) && answer.products.length > 0,
+    sessionId: String(chatSession.generation || 0)
+  };
+  fetch("/api/events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  }).catch(() => {});
+}
+
 function renderCategories() {
   $("#categories").innerHTML = `<button class="category-chip ${state.category ? "" : "active"}" data-category="">Tất cả</button>` + state.categories.map((category) => `<button class="category-chip ${state.category === category.slug ? "active" : ""}" data-category="${escapeHtml(category.slug)}">${escapeHtml(category.name)}</button>`).join("");
 }
@@ -300,6 +315,8 @@ async function processChatMessage(message) {
     const answer = await api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message, history: chatHistory.slice(-8) }) });
     typing.remove();
     if (generation !== chatSession.generation) return;
+    // Đẩy chatbot event vào pipeline (fire-and-forget)
+    sendChatbotEvent(message, answer);
     const checkoutMode = isOnlinePaymentIntent(message) || chatSession.flow === "selecting";
     if (checkoutMode) {
       chatSession.flow = "selecting";

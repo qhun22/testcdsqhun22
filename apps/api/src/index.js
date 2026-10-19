@@ -36,6 +36,101 @@ function randomTransferCode() {
   return chars.join("");
 }
 
+// ─── Big Data Pipeline: Stream → Pipeline → Sink → Basin ─────────────────────
+
+// Tầng Pipeline: validate và enrich raw event thành structured event
+function pipeline(rawEvent, request) {
+  const country = /^[A-Z]{2}$/.test(request.cf?.country || "") ? request.cf.country : "ZZ";
+  const os = operatingSystem(request.headers.get("user-agent") || "");
+  const ts = new Date().toISOString();
+  const type = String(rawEvent?.type || "");
+  if (!["page_view", "chatbot_message"].includes(type)) return null;
+  const base = { type, ts, country, os, ip_hash: "" };
+  if (type === "page_view") {
+    return { ...base, page: "home" };
+  }
+  // chatbot_message
+  const messageLen = Math.min(500, Math.max(0, Number(rawEvent?.messageLen) || 0));
+  const hasProductResult = rawEvent?.hasProductResult ? 1 : 0;
+  const sessionId = String(rawEvent?.sessionId || "").slice(0, 64);
+  return { ...base, messageLen, hasProductResult, sessionId };
+}
+
+// Tầng Sink 1: ghi raw JSONL vào R2 (Data Lake) — phân vùng theo year/month/day/hour
+async function sinkToR2(env, structuredEvent) {
+  if (!env.DATA_LAKE) return;
+  const now = new Date(structuredEvent.ts);
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(now.getUTCDate()).padStart(2, "0");
+  const hour = String(now.getUTCHours()).padStart(2, "0");
+  // Key phân vùng: events/type=page_view/year=2026/month=10/day=19/hour=14/<ts>.jsonl
+  const key = `events/type=${structuredEvent.type}/year=${year}/month=${month}/day=${day}/hour=${hour}/${structuredEvent.ts.replace(/[:.]/g, "-")}.jsonl`;
+  const line = JSON.stringify(structuredEvent) + "\n";
+  try {
+    await env.DATA_LAKE.put(key, line, { httpMetadata: { contentType: "application/x-ndjson" } });
+  } catch (exception) {
+    console.error("R2 sink failed", exception.name);
+  }
+}
+
+// Tầng Sink 2: ghi vào Analytics Engine (Basin / Data Catalog — time-series)
+function sinkToAnalyticsEngine(env, structuredEvent) {
+  if (!env.ANALYTICS) return;
+  try {
+    // Analytics Engine writeDataPoint: blobs = labels, doubles = metrics
+    env.ANALYTICS.writeDataPoint({
+      blobs: [
+        structuredEvent.type,       // blob1: loại sự kiện
+        structuredEvent.country,    // blob2: quốc gia
+        structuredEvent.os,         // blob3: hệ điều hành
+        structuredEvent.page || ""  // blob4: tên trang (page_view) hoặc rỗng
+      ],
+      doubles: [
+        1,                                          // double1: count
+        structuredEvent.messageLen || 0,            // double2: độ dài tin nhắn
+        structuredEvent.hasProductResult || 0       // double3: có kết quả sản phẩm không
+      ],
+      indexes: [structuredEvent.type]               // index để filter nhanh
+    });
+  } catch (exception) {
+    console.error("Analytics Engine sink failed", exception.name);
+  }
+}
+
+// Tầng Sink 3: ghi structured chatbot event vào D1 (Basin structured query)
+async function sinkChatbotToD1(env, structuredEvent) {
+  if (structuredEvent.type !== "chatbot_message") return;
+  try {
+    await env.DB.prepare(
+      "INSERT INTO chatbot_events (ts, country, operating_system, message_len, has_product_result, session_id) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(
+      structuredEvent.ts,
+      structuredEvent.country,
+      structuredEvent.os,
+      structuredEvent.messageLen,
+      structuredEvent.hasProductResult,
+      structuredEvent.sessionId
+    ).run();
+  } catch (exception) {
+    console.error("D1 chatbot sink failed", exception.name);
+  }
+}
+
+// Entry point cho toàn bộ pipeline: nhận raw event, chạy qua tất cả các Sink
+async function runPipeline(rawEvent, request, env) {
+  const structured = pipeline(rawEvent, request);
+  if (!structured) return;
+  // Chạy song song cả 3 sink
+  await Promise.all([
+    sinkToR2(env, structured),
+    Promise.resolve(sinkToAnalyticsEngine(env, structured)),
+    sinkChatbotToD1(env, structured)
+  ]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function recordPageView(request, env) {
   const country = /^[A-Z]{2}$/.test(request.cf?.country || "") ? request.cf.country : "ZZ";
   const os = operatingSystem(request.headers.get("user-agent") || "");
@@ -225,7 +320,7 @@ async function signOrderStatusToken(secret, orderId) {
   return [...signature].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function api(request, env) {
+async function api(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/$/, "") || "/";
   const method = request.method;
@@ -238,6 +333,17 @@ async function api(request, env) {
   if (path === "/api/analytics/page-view" && method === "POST") {
     await recordPageView(request, env);
     return json({ ok: true, recorded: true, page: "home" }, 201);
+  }
+
+  // Stream endpoint: nhận raw events từ frontend, đẩy qua Pipeline → Sink → Basin
+  if (path === "/api/events" && method === "POST") {
+    const body = await readBody(request);
+    if (!body || !body.type) return error("Thiếu trường type.", 400);
+    // Chạy pipeline bất đồng bộ, không block response
+    ctx.waitUntil(runPipeline(body, request, env).catch((exception) => {
+      console.error("Pipeline failed", exception.name);
+    }));
+    return json({ ok: true }, 202);
   }
 
   if (path === "/api/chat" && method === "POST") return chat(request, env);
@@ -421,6 +527,25 @@ async function api(request, env) {
     return json({ ok: true, days: 30, countries: 10, operatingSystems: 6, views: totalViews });
   }
 
+  if (path === "/api/admin/analytics/chatbot" && method === "GET") {
+    const hours = 24;
+    const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+    const [total, byCountry, byOs, byHour] = await Promise.all([
+      env.DB.prepare("SELECT COUNT(*) AS messages, SUM(has_product_result) AS product_hits FROM chatbot_events WHERE ts >= ?").bind(since).first(),
+      env.DB.prepare("SELECT country, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY country ORDER BY messages DESC LIMIT 10").bind(since).all(),
+      env.DB.prepare("SELECT operating_system AS name, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY operating_system ORDER BY messages DESC").bind(since).all(),
+      env.DB.prepare("SELECT strftime('%H', ts) AS hour, COUNT(*) AS messages FROM chatbot_events WHERE ts >= ? GROUP BY hour ORDER BY hour").bind(since).all()
+    ]);
+    return json({
+      hours,
+      messages: total?.messages || 0,
+      productHits: total?.product_hits || 0,
+      countries: byCountry.results,
+      operatingSystems: byOs.results,
+      timeline: byHour.results
+    });
+  }
+
   if (path === "/api/admin/products" && method === "GET") {
     const { results } = await env.DB.prepare("SELECT p.*, c.name AS category_name FROM products p LEFT JOIN categories c ON c.id = p.category_id ORDER BY p.created_at DESC").all();
     return json(results);
@@ -490,7 +615,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
-      try { return await api(request, env); }
+      try { return await api(request, env, ctx); }
       catch (exception) { console.error(exception); return error("Máy chủ gặp lỗi, vui lòng thử lại.", 500); }
     }
     const response = await env.ASSETS.fetch(request);
@@ -505,7 +630,8 @@ export default {
     try {
       await env.DB.batch([
         env.DB.prepare("DELETE FROM pageview_daily WHERE day < date('now', '-90 days')"),
-        env.DB.prepare("DELETE FROM pageview_demo_daily WHERE day < date('now', '-90 days')")
+        env.DB.prepare("DELETE FROM pageview_demo_daily WHERE day < date('now', '-90 days')"),
+        env.DB.prepare("DELETE FROM chatbot_events WHERE ts < datetime('now', '-90 days')")
       ]);
     } catch (exception) {
       console.error("Page-view analytics retention cleanup failed", exception.name);
