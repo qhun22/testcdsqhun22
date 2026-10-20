@@ -4,15 +4,74 @@
 ### Luồng: [Website/Chatbot] → Stream → Pipeline → Sink → Basin Catalog
 ###
 ### Schema Pipeline (giống thầy hướng dẫn):
-###   POST /api/pipeline  →  id, country, device, ip, time, meta
-###   ↕ tương đương endpoint *.ingest.cloudflare.com của Cloudflare Pipelines
+###   POST *.ingest.cloudflare.com  →  id, country, device, ip, time, meta
+###   Data hiện ra trong: Basin Catalog → visitors → Query data
 ### ============================================================
 
 @host = https://testcdsqhun22.qhun22.workers.dev
+@teacherIngest = https://f8fb6f6f730b404fb2f273fd789d04df.ingest.cloudflare.com
 @adminToken = qhun22
 @group = Nhom4-ChuyenDoiSo
 
-### ── PIPELINE INGEST: Schema giống thầy hướng dẫn ────────────────────────────
+### ── ĐẨY THẲNG VÀO BASIN CATALOG CỦA THẦY (*.ingest.cloudflare.com) ─────────
+### Data sẽ hiện ngay trong: Cloudflare Dashboard → Basin Catalog → visitors → Query data
+### Đây là cách thầy hướng dẫn: POST thẳng vào Pipeline ingest endpoint
+
+### [0a] Nhóm 4 — page_view từ Việt Nam, iOS → Basin Catalog thầy
+POST {{teacherIngest}} HTTP/1.1
+Content-Type: application/json
+
+{
+    "id": "Nhom4",
+    "country": "VN",
+    "device": "ios",
+    "ip": "123.3456.57.234",
+    "time": 1791853920,
+    "meta": {
+        "key": "Nhom4-ChuyenDoiSo",
+        "value": "page_view"
+    }
+}
+
+###
+
+### [0b] Nhóm 4 — chatbot_message từ Việt Nam, Android → Basin Catalog thầy
+POST {{teacherIngest}} HTTP/1.1
+Content-Type: application/json
+
+{
+    "id": "Nhom4",
+    "country": "VN",
+    "device": "android",
+    "ip": "123.3456.57.234",
+    "time": 1791853920,
+    "meta": {
+        "key": "Nhom4-ChuyenDoiSo",
+        "value": "chatbot_message"
+    }
+}
+
+###
+
+### [0c] Nhóm 4 — checkout_complete từ Singapore, iOS → Basin Catalog thầy
+POST {{teacherIngest}} HTTP/1.1
+Content-Type: application/json
+
+{
+    "id": "Nhom4-guest",
+    "country": "SG",
+    "device": "ios",
+    "ip": "103.25.10.5",
+    "time": 1791853920,
+    "meta": {
+        "key": "Nhom4-ChuyenDoiSo",
+        "value": "checkout_complete"
+    }
+}
+
+###
+
+### ── PIPELINE INGEST: Hệ thống riêng Nhóm 4 (Worker endpoint) ────────────────
 ### Endpoint POST /api/pipeline nhận đúng format:
 ###   id, country, device, ip, time (unix ms), meta (json object)
 ### Dữ liệu ghi vào D1 table "visitors" (= Basin Catalog Query data)
