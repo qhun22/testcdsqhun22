@@ -2,15 +2,113 @@
 ### Nhóm 4 — Chuyển đổi số — Kiến trúc Big Data / Data Lake
 ### Hệ thống: Chợ Nhà (cho-nha-commerce)
 ### Luồng: [Website/Chatbot] → Stream → Pipeline → Sink → Basin Catalog
+###
+### Schema Pipeline (giống thầy hướng dẫn):
+###   POST /api/pipeline  →  id, country, device, ip, time, meta
+###   ↕ tương đương endpoint *.ingest.cloudflare.com của Cloudflare Pipelines
 ### ============================================================
 
 @host = https://testcdsqhun22.qhun22.workers.dev
 @adminToken = qhun22
 @group = Nhom4-ChuyenDoiSo
 
-### ── STREAM: Bơm lượt truy cập trang chủ (page_view) ─────────────────────────
+### ── PIPELINE INGEST: Schema giống thầy hướng dẫn ────────────────────────────
+### Endpoint POST /api/pipeline nhận đúng format:
+###   id, country, device, ip, time (unix ms), meta (json object)
+### Dữ liệu ghi vào D1 table "visitors" (= Basin Catalog Query data)
 
-### [1] Page view — Nhóm 4 test truy cập từ Việt Nam
+### [1] Pipeline — Nhóm 4 truy cập từ Việt Nam, thiết bị iOS
+# Luồng: POST /api/pipeline → pipeline() → D1 visitors + R2 Data Lake
+POST {{host}}/api/pipeline HTTP/1.1
+Content-Type: application/json
+
+{
+    "id": "Nhom4",
+    "country": "VN",
+    "device": "ios",
+    "ip": "123.3456.57.234",
+    "time": 1791853920,
+    "meta": {
+        "key": "Nhom4-ChuyenDoiSo",
+        "value": "page_view"
+    }
+}
+
+###
+
+### [2] Pipeline — Nhóm 4 truy cập từ Việt Nam, thiết bị Android
+POST {{host}}/api/pipeline HTTP/1.1
+Content-Type: application/json
+
+{
+    "id": "Nhom4",
+    "country": "VN",
+    "device": "android",
+    "ip": "123.3456.57.234",
+    "time": 1791853920,
+    "meta": {
+        "key": "Nhom4-ChuyenDoiSo",
+        "value": "chatbot_message"
+    }
+}
+
+###
+
+### [3] Pipeline — Nhóm 4 truy cập từ Việt Nam, thiết bị PC
+POST {{host}}/api/pipeline HTTP/1.1
+Content-Type: application/json
+
+{
+    "id": "Nhom4",
+    "country": "VN",
+    "device": "pc",
+    "ip": "123.3456.57.234",
+    "time": 1791853920,
+    "meta": {
+        "key": "Nhom4-ChuyenDoiSo",
+        "value": "add_to_cart"
+    }
+}
+
+###
+
+### [4] Pipeline — Khách Singapore, iOS, checkout
+POST {{host}}/api/pipeline HTTP/1.1
+Content-Type: application/json
+
+{
+    "id": "Nhom4-guest",
+    "country": "SG",
+    "device": "ios",
+    "ip": "103.25.10.5",
+    "time": 1791853920,
+    "meta": {
+        "key": "Nhom4-ChuyenDoiSo",
+        "value": "checkout_complete"
+    }
+}
+
+###
+
+### ── BASIN CATALOG QUERY: Xem kết quả trong D1 (= Query data tab của thầy) ───
+### Tương đương với: Basin Catalog → visitors table → Query data
+
+### [5] Xem tất cả visitors (Basin Catalog query — D1 table visitors)
+GET {{host}}/api/admin/analytics/visitors HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### [6] Xem visitors với limit 10
+GET {{host}}/api/admin/analytics/visitors?limit=10 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### ── STREAM: Bơm lượt truy cập trang chủ (type=page_view) ───────────────────
+### Endpoint cũ — nhận event type: page_view | chatbot_message
+
+### [7] Page view — Nhóm 4 test truy cập từ Việt Nam
 # Dữ liệu đi qua: POST /api/events → pipeline() → sinkToR2 + sinkToAnalyticsEngine + pageview_daily
 POST {{host}}/api/events HTTP/1.1
 Content-Type: application/json
@@ -23,7 +121,7 @@ Content-Type: application/json
 
 ###
 
-### [2] Page view lần 2 (mô phỏng nhiều lượt truy cập)
+### [8] Page view lần 2
 POST {{host}}/api/events HTTP/1.1
 Content-Type: application/json
 
@@ -35,21 +133,9 @@ Content-Type: application/json
 
 ###
 
-### [3] Page view lần 3
-POST {{host}}/api/events HTTP/1.1
-Content-Type: application/json
-
-{
-    "type": "page_view",
-    "source": "{{group}}",
-    "note": "Nhom 4 - lan truy cap thu 3"
-}
-
-###
-
 ### ── STREAM: Bơm sự kiện tương tác chatbot (chatbot_message) ──────────────────
 
-### [4] Chatbot — hỏi về sản phẩm rau củ
+### [9] Chatbot — hỏi về sản phẩm rau củ
 # Dữ liệu đi qua: POST /api/events → pipeline() → sinkToR2 + sinkToAnalyticsEngine + chatbot_events (D1)
 POST {{host}}/api/events HTTP/1.1
 Content-Type: application/json
@@ -64,7 +150,7 @@ Content-Type: application/json
 
 ###
 
-### [5] Chatbot — hỏi giá hạt điều
+### [10] Chatbot — hỏi giá hạt điều
 POST {{host}}/api/events HTTP/1.1
 Content-Type: application/json
 
@@ -78,7 +164,7 @@ Content-Type: application/json
 
 ###
 
-### [6] Chatbot — hỏi về thanh toán VietQR
+### [11] Chatbot — hỏi về thanh toán VietQR
 POST {{host}}/api/events HTTP/1.1
 Content-Type: application/json
 
@@ -92,7 +178,7 @@ Content-Type: application/json
 
 ###
 
-### [7] Chatbot — hỏi giao hàng
+### [12] Chatbot — hỏi giao hàng
 POST {{host}}/api/events HTTP/1.1
 Content-Type: application/json
 
@@ -106,7 +192,7 @@ Content-Type: application/json
 
 ###
 
-### [8] Chatbot — hỏi mua mật ong
+### [13] Chatbot — hỏi mua mật ong
 POST {{host}}/api/events HTTP/1.1
 Content-Type: application/json
 
@@ -120,9 +206,9 @@ Content-Type: application/json
 
 ###
 
-### ── SINK: Ghi thẳng page-view vào D1 (endpoint cũ vẫn giữ) ──────────────────
+### ── SINK: Ghi thẳng page-view vào D1 ────────────────────────────────────────
 
-### [9] Ghi page view qua endpoint cũ (ghi thẳng vào D1 pageview_daily)
+### [14] Ghi page view qua endpoint cũ (ghi thẳng vào D1 pageview_daily)
 POST {{host}}/api/analytics/page-view HTTP/1.1
 Content-Type: application/json
 
@@ -130,21 +216,21 @@ Content-Type: application/json
 
 ###
 
-### ── BASIN: Kiểm tra kết quả thống kê 24h trên Admin API ─────────────────────
+### ── BASIN QUERY: Admin API xem analytics ────────────────────────────────────
 
-### [10] Xem chatbot analytics 24h (Basin query từ D1 chatbot_events)
+### [15] Xem chatbot analytics 24h (Basin query từ D1 chatbot_events)
 GET {{host}}/api/admin/analytics/chatbot HTTP/1.1
 Authorization: Bearer {{adminToken}}
 
 ###
 
-### [11] Xem page-view analytics 7 ngày (Basin query từ D1 pageview_daily)
+### [16] Xem page-view analytics 7 ngày (Basin query từ D1 pageview_daily)
 GET {{host}}/api/admin/analytics?days=7 HTTP/1.1
 Authorization: Bearer {{adminToken}}
 
 ###
 
-### [12] Xem tổng quan cửa hàng (products, orders, customers)
+### [17] Xem tổng quan cửa hàng (products, orders, customers)
 GET {{host}}/api/admin/summary HTTP/1.1
 Authorization: Bearer {{adminToken}}
 

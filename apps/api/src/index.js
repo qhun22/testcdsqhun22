@@ -369,6 +369,40 @@ async function api(request, env, ctx) {
     return json({ ok: true }, 202);
   }
 
+  // Pipeline ingest endpoint: nhận schema giống Cloudflare Pipelines (id/country/device/ip/time/meta)
+  // Tương đương endpoint *.ingest.cloudflare.com của thầy — ghi vào D1 table visitors (Basin Catalog)
+  if (path === "/api/pipeline" && method === "POST") {
+    const body = await readBody(request);
+    if (!body) return error("Thiếu body.", 400);
+    const visitorId = String(body?.id || "").slice(0, 64);
+    const country = /^[A-Z]{2}$/.test(String(body?.country || "")) ? body.country : (request.cf?.country || "ZZ");
+    const device = String(body?.device || "unknown").slice(0, 32);
+    const ip = String(body?.ip || request.headers.get("cf-connecting-ip") || "").slice(0, 64);
+    const rawTime = body?.time;
+    const ts = rawTime ? new Date(typeof rawTime === "number" && rawTime < 1e12 ? rawTime * 1000 : rawTime).toISOString() : new Date().toISOString();
+    const meta = body?.meta ? JSON.stringify(body.meta) : "{}";
+    ctx.waitUntil((async () => {
+      try {
+        await env.DB.prepare(
+          "INSERT INTO visitors (visitor_id, country, device, ip, ts, meta, ingest_ts) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).bind(visitorId, country, device, ip, ts, meta, new Date().toISOString()).run();
+      } catch (exception) {
+        console.error("Pipeline visitors sink failed", exception.name);
+      }
+      // Đồng thời ghi vào R2 Data Lake (NDJSON)
+      try {
+        const now = new Date();
+        const key = `pipeline/country=${country}/device=${device}/year=${now.getUTCFullYear()}/month=${String(now.getUTCMonth()+1).padStart(2,"0")}/day=${String(now.getUTCDate()).padStart(2,"0")}/${now.toISOString().replace(/[:.]/g,"-")}.ndjson`;
+        await env.DATA_LAKE.put(key, JSON.stringify({ visitor_id: visitorId, country, device, ip, ts, meta: body?.meta || {} }), {
+          httpMetadata: { contentType: "application/x-ndjson" }
+        });
+      } catch (exception) {
+        console.error("Pipeline R2 sink failed", exception.name);
+      }
+    })());
+    return json({ ok: true }, 202);
+  }
+
   if (path === "/api/chat" && method === "POST") return chat(request, env);
 
   const orderStatusMatch = path.match(/^\/api\/orders\/([1-9]\d*)$/);
@@ -570,6 +604,23 @@ async function api(request, env, ctx) {
       operatingSystems: byOs.results,
       timeline: byHour.results,
       recentMessages: recent.results
+    });
+  }
+
+  // Basin Catalog query: xem dữ liệu visitors từ D1 (tương đương Query data tab trong Basin Catalog của thầy)
+  if (path === "/api/admin/analytics/visitors" && method === "GET") {
+    const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200);
+    const [total, byCountry, byDevice, recent] = await Promise.all([
+      env.DB.prepare("SELECT COUNT(*) AS total FROM visitors").first(),
+      env.DB.prepare("SELECT country, COUNT(*) AS count FROM visitors GROUP BY country ORDER BY count DESC LIMIT 10").all(),
+      env.DB.prepare("SELECT device, COUNT(*) AS count FROM visitors GROUP BY device ORDER BY count DESC").all(),
+      env.DB.prepare("SELECT visitor_id AS id, country, device, ip, ts, meta, ingest_ts AS __ingest_ts FROM visitors ORDER BY ingest_ts DESC LIMIT ?").bind(limit).all(),
+    ]);
+    return json({
+      total: total?.total || 0,
+      byCountry: byCountry.results,
+      byDevice: byDevice.results,
+      rows: recent.results,
     });
   }
 
