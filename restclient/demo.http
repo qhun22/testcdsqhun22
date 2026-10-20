@@ -1,5 +1,151 @@
-### Ghi thử một lượt xem trang cửa hàng; phản hồi JSON xác nhận đã ghi vào D1
-POST https://testcdsqhun22.qhun22.workers.dev/api/analytics/page-view HTTP/1.1
+### ============================================================
+### Nhóm 4 — Chuyển đổi số — Kiến trúc Big Data / Data Lake
+### Hệ thống: Chợ Nhà (cho-nha-commerce)
+### Luồng: [Website/Chatbot] → Stream → Pipeline → Sink → Basin Catalog
+### ============================================================
+
+@host = https://testcdsqhun22.qhun22.workers.dev
+@adminToken = qhun22
+@group = Nhom4-ChuyenDoiSo
+
+### ── STREAM: Bơm lượt truy cập trang chủ (page_view) ─────────────────────────
+
+### [1] Page view — Nhóm 4 test truy cập từ Việt Nam
+# Dữ liệu đi qua: POST /api/events → pipeline() → sinkToR2 + sinkToAnalyticsEngine + pageview_daily
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "page_view",
+    "source": "{{group}}",
+    "note": "Nhom 4 - Chuyen doi so - kiem tra luong page_view qua Big Data Pipeline"
+}
+
+###
+
+### [2] Page view lần 2 (mô phỏng nhiều lượt truy cập)
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "page_view",
+    "source": "{{group}}",
+    "note": "Nhom 4 - lan truy cap thu 2"
+}
+
+###
+
+### [3] Page view lần 3
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "page_view",
+    "source": "{{group}}",
+    "note": "Nhom 4 - lan truy cap thu 3"
+}
+
+###
+
+### ── STREAM: Bơm sự kiện tương tác chatbot (chatbot_message) ──────────────────
+
+### [4] Chatbot — hỏi về sản phẩm rau củ
+# Dữ liệu đi qua: POST /api/events → pipeline() → sinkToR2 + sinkToAnalyticsEngine + chatbot_events (D1)
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "chatbot_message",
+    "messageLen": 28,
+    "messagePreview": "Nhom4: co rau cu gi khong ban",
+    "hasProductResult": true,
+    "sessionId": "{{group}}-session-1"
+}
+
+###
+
+### [5] Chatbot — hỏi giá hạt điều
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "chatbot_message",
+    "messageLen": 30,
+    "messagePreview": "Nhom4: gia hat dieu bao nhieu vay",
+    "hasProductResult": true,
+    "sessionId": "{{group}}-session-1"
+}
+
+###
+
+### [6] Chatbot — hỏi về thanh toán VietQR
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "chatbot_message",
+    "messageLen": 35,
+    "messagePreview": "Nhom4: thanh toan VietQR nhu the nao",
+    "hasProductResult": false,
+    "sessionId": "{{group}}-session-2"
+}
+
+###
+
+### [7] Chatbot — hỏi giao hàng
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "chatbot_message",
+    "messageLen": 26,
+    "messagePreview": "Nhom4: phi giao hang bao nhieu",
+    "hasProductResult": false,
+    "sessionId": "{{group}}-session-2"
+}
+
+###
+
+### [8] Chatbot — hỏi mua mật ong
+POST {{host}}/api/events HTTP/1.1
+Content-Type: application/json
+
+{
+    "type": "chatbot_message",
+    "messageLen": 22,
+    "messagePreview": "Nhom4: co mat ong khong",
+    "hasProductResult": true,
+    "sessionId": "{{group}}-session-3"
+}
+
+###
+
+### ── SINK: Ghi thẳng page-view vào D1 (endpoint cũ vẫn giữ) ──────────────────
+
+### [9] Ghi page view qua endpoint cũ (ghi thẳng vào D1 pageview_daily)
+POST {{host}}/api/analytics/page-view HTTP/1.1
 Content-Type: application/json
 
 {}
+
+###
+
+### ── BASIN: Kiểm tra kết quả thống kê 24h trên Admin API ─────────────────────
+
+### [10] Xem chatbot analytics 24h (Basin query từ D1 chatbot_events)
+GET {{host}}/api/admin/analytics/chatbot HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### [11] Xem page-view analytics 7 ngày (Basin query từ D1 pageview_daily)
+GET {{host}}/api/admin/analytics?days=7 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### [12] Xem tổng quan cửa hàng (products, orders, customers)
+GET {{host}}/api/admin/summary HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
