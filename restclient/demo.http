@@ -14,8 +14,10 @@
 @group = Nhom4-ChuyenDoiSo
 
 ### ── ĐẨY THẲNG VÀO BASIN CATALOG CỦA THẦY (*.ingest.cloudflare.com) ─────────
-### Data sẽ hiện ngay trong: Cloudflare Dashboard → Basin Catalog → visitors → Query data
-### Đây là cách thầy hướng dẫn: POST thẳng vào Pipeline ingest endpoint
+### Data sẽ hiện trong: Cloudflare Dashboard → Basin Catalog → visitors → Query data
+### Verify: thầy chạy SQL sau trong Query data tab để xác nhận data Nhóm 4 đã vào:
+###   SELECT * FROM visitors WHERE id = '04' OR id = 'nhom 04' ORDER BY __ingest_ts DESC
+### Response thành công: {"success":true,"result":{"committed":1}} + HTTP 200
 
 ### [0a] id=04 — page_view từ Việt Nam, iOS → Basin Catalog thầy
 # Thầy filter: id='04' hoặc id='nhom 04' để thấy data Nhóm 4
