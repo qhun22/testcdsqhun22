@@ -44,20 +44,23 @@ async function api(path, options) {
   return data;
 }
 
-// Gửi raw chatbot event vào Stream endpoint → Pipeline → Sink (R2 + D1 + Analytics Engine)
-function sendChatbotEvent(message, answer) {
-  const payload = {
-    type: "chatbot_message",
-    messageLen: message.length,
-    messagePreview: message.slice(0, 80),
-    hasProductResult: Array.isArray(answer?.products) && answer.products.length > 0,
-    sessionId: String(chatSession.generation || 0)
-  };
+// Gửi event vào Stream → Pipeline → Sink (R2 + D1 behavior_events + Analytics Engine)
+function sendEvent(payload) {
   fetch("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
   }).catch(() => {});
+}
+
+function sendChatbotEvent(message, answer) {
+  sendEvent({
+    type: "chatbot_message",
+    messageLen: message.length,
+    messagePreview: message.slice(0, 80),
+    hasProductResult: Array.isArray(answer?.products) && answer.products.length > 0,
+    sessionId: String(chatSession.generation || 0)
+  });
 }
 
 function renderCategories() {
@@ -97,6 +100,7 @@ function addProductToCart(product) {
   else state.cart.push({ id: product.id, name: product.name, price: product.price, image: imageUrl(product), quantity: 1 });
   persistCart();
   showToast("Đã thêm vào giỏ hàng");
+  sendEvent({ type: "add_to_cart", productId: String(product.id), productName: product.name, quantity: 1, price: product.price });
 }
 
 function renderChatMessage(entry) {
@@ -446,6 +450,7 @@ $("#chat-messages").addEventListener("submit", async (event) => {
     if (generation !== chatSession.generation) return;
     form.querySelectorAll("input, textarea, button").forEach((field) => { field.disabled = true; });
     status.textContent = `Đã tạo đơn #${order.id}.`;
+    sendEvent({ type: "checkout_complete", orderId: String(order.id), total: order.total, paymentMethod: "vietqr" });
     chatSession.checkoutItems = [];
     chatSession.customer = {};
     chatSession.flow = "complete";
@@ -480,11 +485,24 @@ $("#products").addEventListener("click", (event) => {
   addProductToCart(product);
 });
 
+$("#products").addEventListener("click", (event) => {
+  const card = event.target.closest("article.product-card");
+  if (!card || event.target.closest("[data-add]")) return;
+  const addBtn = card.querySelector("[data-add]");
+  if (!addBtn) return;
+  const product = state.products.find((item) => item.id === Number(addBtn.dataset.add));
+  if (product) sendEvent({ type: "view_product", productId: String(product.id), productName: product.name });
+}, { capture: true });
+
 $("#cart-items").addEventListener("click", (event) => {
   const button = event.target.closest("[data-quantity]");
   if (!button) return;
   const item = state.cart.find((entry) => entry.id === Number(button.dataset.quantity));
-  if (item) item.quantity += Number(button.dataset.delta);
+  if (item) {
+    const delta = Number(button.dataset.delta);
+    item.quantity += delta;
+    if (item.quantity <= 0) sendEvent({ type: "remove_from_cart", productId: String(item.id), productName: item.name, quantity: 1, price: item.price });
+  }
   state.cart = state.cart.filter((entry) => entry.quantity > 0);
   persistCart();
 });
@@ -494,9 +512,18 @@ function setCartOpen(open) {
   $("#cart-drawer").setAttribute("aria-hidden", String(!open));
   $("#cart-backdrop").hidden = !open;
 }
-$("#open-cart").addEventListener("click", () => setCartOpen(true));
-$("#close-cart").addEventListener("click", () => setCartOpen(false));
-$("#cart-backdrop").addEventListener("click", () => setCartOpen(false));
+$("#open-cart").addEventListener("click", () => {
+  setCartOpen(true);
+  if (state.cart.length) sendEvent({ type: "checkout_start", cartSize: state.cart.reduce((n, i) => n + i.quantity, 0), cartTotal: state.cart.reduce((s, i) => s + i.price * i.quantity, 0) });
+});
+$("#close-cart").addEventListener("click", () => {
+  if (state.cart.length) sendEvent({ type: "abandon_cart", cartSize: state.cart.reduce((n, i) => n + i.quantity, 0), cartTotal: state.cart.reduce((s, i) => s + i.price * i.quantity, 0) });
+  setCartOpen(false);
+});
+$("#cart-backdrop").addEventListener("click", () => {
+  if (state.cart.length) sendEvent({ type: "abandon_cart", cartSize: state.cart.reduce((n, i) => n + i.quantity, 0), cartTotal: state.cart.reduce((s, i) => s + i.price * i.quantity, 0) });
+  setCartOpen(false);
+});
 
 $("#checkout-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -511,6 +538,7 @@ $("#checkout-form").addEventListener("submit", async (event) => {
   paymentPanel.replaceChildren();
   try {
     const order = await api("/api/orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ customer: { name: form.get("name"), phone: form.get("phone"), email: form.get("email"), address: form.get("address") }, paymentMethod: form.get("paymentMethod"), items: state.cart.map(({ id, quantity }) => ({ productId: id, quantity })) }) });
+    sendEvent({ type: "checkout_complete", orderId: String(order.id), total: order.total, paymentMethod: form.get("paymentMethod") || "cod" });
     state.cart = [];
     persistCart();
     formElement.reset();
@@ -553,3 +581,5 @@ async function init() {
 restoreChatSession();
 if (chatSession.pendingMessage) processChatMessage(chatSession.pendingMessage);
 init();
+// Ghi page_view khi load xong trang
+sendEvent({ type: "page_view", page: "home" });

@@ -55,10 +55,38 @@ function pipeline(rawEvent, request) {
   const os = operatingSystem(request.headers.get("user-agent") || "");
   const ts = new Date().toISOString();
   const type = String(rawEvent?.type || "");
-  if (!["page_view", "chatbot_message"].includes(type)) return null;
+  const allowed = ["page_view", "chatbot_message", "view_product", "add_to_cart", "remove_from_cart", "checkout_start", "checkout_complete", "abandon_cart"];
+  if (!allowed.includes(type)) return null;
 
   if (type === "page_view") {
-    return { type, ts, country, os, page: "home" };
+    return { type, ts, country, os, page: String(rawEvent?.page || "home").slice(0, 64) };
+  }
+
+  if (type === "view_product") {
+    return { type, ts, country, os,
+      productId: String(rawEvent?.productId || "").slice(0, 32),
+      productName: String(rawEvent?.productName || "").slice(0, 128) };
+  }
+
+  if (["add_to_cart", "remove_from_cart", "abandon_cart"].includes(type)) {
+    return { type, ts, country, os,
+      productId: String(rawEvent?.productId || "").slice(0, 32),
+      productName: String(rawEvent?.productName || "").slice(0, 128),
+      quantity: Number(rawEvent?.quantity) || 1,
+      price: Number(rawEvent?.price) || 0 };
+  }
+
+  if (type === "checkout_start") {
+    return { type, ts, country, os,
+      cartSize: Number(rawEvent?.cartSize) || 0,
+      cartTotal: Number(rawEvent?.cartTotal) || 0 };
+  }
+
+  if (type === "checkout_complete") {
+    return { type, ts, country, os,
+      orderId: String(rawEvent?.orderId || "").slice(0, 32),
+      total: Number(rawEvent?.total) || 0,
+      paymentMethod: String(rawEvent?.paymentMethod || "").slice(0, 32) };
   }
 
   // chatbot_message — lưu thêm preview nội dung (tối đa 80 ký tự)
@@ -96,9 +124,9 @@ async function sinkToR2(env, structuredEvent) {
   }
 }
 
-// Tầng SINK 2 — Analytics Engine (Basin: time-series catalog, query bằng SQL trong Dashboard)
-// Schema: blob1=type, blob2=country, blob3=os, blob4=page
-//         double1=count, double2=messageLen, double3=hasProductResult
+// Tầng SINK 2 — Analytics Engine
+// blob1=type, blob2=country, blob3=os, blob4=page/productName, blob5=productId, blob6=paymentMethod
+// double1=count, double2=messageLen/price, double3=hasProductResult/quantity, double4=total/cartTotal
 function sinkToAnalyticsEngine(env, structuredEvent) {
   if (!env.ANALYTICS_ENGINE) return;
   try {
@@ -107,12 +135,15 @@ function sinkToAnalyticsEngine(env, structuredEvent) {
         structuredEvent.type,
         structuredEvent.country,
         structuredEvent.os,
-        structuredEvent.page || ""
+        structuredEvent.page || structuredEvent.productName || "",
+        structuredEvent.productId || structuredEvent.orderId || "",
+        structuredEvent.paymentMethod || ""
       ],
       doubles: [
         1,
-        structuredEvent.messageLen || 0,
-        structuredEvent.hasProductResult || 0
+        structuredEvent.messageLen || structuredEvent.price || 0,
+        structuredEvent.hasProductResult || structuredEvent.quantity || 0,
+        structuredEvent.total || structuredEvent.cartTotal || 0
       ],
       indexes: [structuredEvent.type]
     });
@@ -141,6 +172,34 @@ async function sinkChatbotToD1(env, structuredEvent) {
   }
 }
 
+// Sink 3b — D1 behavior_events: ghi toàn bộ hành vi mua sắm (trừ chatbot đã có bảng riêng)
+async function sinkBehaviorToD1(env, structuredEvent) {
+  const behavioral = ["view_product", "add_to_cart", "remove_from_cart", "abandon_cart", "checkout_start", "checkout_complete", "page_view"];
+  if (!behavioral.includes(structuredEvent.type)) return;
+  try {
+    await env.DB.prepare(
+      "INSERT INTO behavior_events (ts, event_type, country, operating_system, product_id, product_name, quantity, price, cart_size, cart_total, order_id, total, payment_method, page) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      structuredEvent.ts,
+      structuredEvent.type,
+      structuredEvent.country,
+      structuredEvent.os,
+      structuredEvent.productId || null,
+      structuredEvent.productName || null,
+      structuredEvent.quantity || null,
+      structuredEvent.price || null,
+      structuredEvent.cartSize || null,
+      structuredEvent.cartTotal || null,
+      structuredEvent.orderId || null,
+      structuredEvent.total || null,
+      structuredEvent.paymentMethod || null,
+      structuredEvent.page || null
+    ).run();
+  } catch (exception) {
+    console.error("D1 behavior sink failed", exception.name);
+  }
+}
+
 // Entry point: nhận raw event từ Stream, chạy qua Pipeline → fan-out 3 Sink song song
 async function runPipeline(rawEvent, request, env) {
   const structured = pipeline(rawEvent, request);
@@ -148,7 +207,8 @@ async function runPipeline(rawEvent, request, env) {
   await Promise.all([
     sinkToR2(env, structured),
     Promise.resolve(sinkToAnalyticsEngine(env, structured)),
-    sinkChatbotToD1(env, structured)
+    sinkChatbotToD1(env, structured),
+    sinkBehaviorToD1(env, structured)
   ]);
 }
 
@@ -605,6 +665,19 @@ async function api(request, env, ctx) {
       timeline: byHour.results,
       recentMessages: recent.results
     });
+  }
+
+  // Basin Catalog query: xem toàn bộ hành vi mua sắm từ D1 behavior_events
+  if (path === "/api/admin/analytics/behavior" && method === "GET") {
+    const hours = Math.min(Number(url.searchParams.get("hours") || 24), 720);
+    const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+    const [summary, byType, topProducts, recent] = await Promise.all([
+      env.DB.prepare("SELECT event_type, COUNT(*) as count FROM behavior_events WHERE ts >= ? GROUP BY event_type ORDER BY count DESC").bind(since).all(),
+      env.DB.prepare("SELECT event_type, COUNT(*) as count, strftime('%H', ts) as hour FROM behavior_events WHERE ts >= ? GROUP BY event_type, hour ORDER BY hour").bind(since).all(),
+      env.DB.prepare("SELECT product_name, event_type, COUNT(*) as count FROM behavior_events WHERE ts >= ? AND product_name IS NOT NULL GROUP BY product_name, event_type ORDER BY count DESC LIMIT 20").bind(since).all(),
+      env.DB.prepare("SELECT ts, event_type, country, operating_system, product_name, quantity, price, cart_total, order_id, total, payment_method FROM behavior_events WHERE ts >= ? ORDER BY ts DESC LIMIT 50").bind(since).all(),
+    ]);
+    return json({ hours, summary: summary.results, byType: byType.results, topProducts: topProducts.results, recent: recent.results });
   }
 
   // Basin Catalog query: xem dữ liệu visitors từ D1 (tương đương Query data tab trong Basin Catalog của thầy)
