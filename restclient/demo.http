@@ -16,7 +16,7 @@
 ### ── ĐẨY THẲNG VÀO BASIN CATALOG CỦA THẦY (*.ingest.cloudflare.com) ─────────
 ### Data sẽ hiện trong: Cloudflare Dashboard → Basin Catalog → visitors → Query data
 ### Verify: thầy chạy SQL sau trong Query data tab để xác nhận data Nhóm 4 đã vào:
-###   SELECT * FROM visitors WHERE id = '04' OR id = 'nhom 04' ORDER BY __ingest_ts DESC
+###   SELECT * FROM visitors WHERE id = '04' ORDER BY __ingest_ts DESC
 ### Response thành công: {"success":true,"result":{"committed":1}} + HTTP 200
 
 ### [0a] id=04 — page_view từ Việt Nam, iOS → Basin Catalog thầy
@@ -56,12 +56,12 @@ Content-Type: application/json
 
 ###
 
-### [0c] id=nhom 04 — checkout_complete từ Việt Nam, PC → Basin Catalog thầy
+### [0c] id=04 — checkout_complete từ Việt Nam, PC → Basin Catalog thầy
 POST {{teacherIngest}} HTTP/1.1
 Content-Type: application/json
 
 {
-    "id": "nhom 04",
+    "id": "04",
     "country": "VN",
     "device": "pc",
     "ip": "123.3456.57.234",
